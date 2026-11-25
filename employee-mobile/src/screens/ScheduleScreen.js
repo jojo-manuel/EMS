@@ -10,6 +10,7 @@ import {
   RefreshControl,
   Alert,
 } from 'react-native';
+import * as Location from 'expo-location';
 import { api } from '../api';
 
 function formatDateTime(iso) {
@@ -148,11 +149,28 @@ export default function ScheduleScreen({ tasks, refreshing, onRefresh }) {
     setReason('');
   };
 
+  async function getCurrentCoordsSafe() {
+    try {
+      const fg = await Location.getForegroundPermissionsAsync();
+      if (fg.status !== 'granted') {
+        const req = await Location.requestForegroundPermissionsAsync();
+        if (req.status !== 'granted') return { lat: null, lng: null };
+      }
+      const pos = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      return { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    } catch {
+      return { lat: null, lng: null };
+    }
+  }
+
   async function submitComplete() {
     if (!completeModalTask) return;
     setSubmitting(true);
     try {
-      await api.completeTask(completeModalTask.id, completionNotes);
+      const { lat, lng } = await getCurrentCoordsSafe();
+      await api.completeTask(completeModalTask.id, completionNotes, lat, lng);
       setCompleteModalTask(null);
       setCompletionNotes('');
       onRefresh();
@@ -174,9 +192,10 @@ export default function ScheduleScreen({ tasks, refreshing, onRefresh }) {
 
     setSubmitting(true);
     try {
-      await api.rescheduleTask(rescheduleModalTask.id, startIso, endIso, reason);
+      const { lat, lng } = await getCurrentCoordsSafe();
+      await api.rescheduleTask(rescheduleModalTask.id, startIso, endIso, reason, lat, lng);
       setRescheduleModalTask(null);
-      Alert.alert('Rescheduled', 'Your schedule was updated and the admin has been notified.');
+      Alert.alert('Rescheduled', 'Your schedule and current location were sent to the admin.');
       onRefresh();
     } catch (err) {
       Alert.alert('Error', err.message);

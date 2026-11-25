@@ -1,5 +1,12 @@
 const express = require('express');
-const { Attendance, EmployeeLocation, LocationHistory, Notification, User } = require('../db');
+const {
+  Attendance,
+  EmployeeLocation,
+  LocationHistory,
+  Notification,
+  User,
+  getAdminUnitScope,
+} = require('../db');
 const { authenticate, requireAdmin } = require('../auth');
 
 function formatAttendance(doc) {
@@ -7,8 +14,11 @@ function formatAttendance(doc) {
   return {
     id: String(doc._id),
     employee_id: emp ? String(emp._id) : String(doc.employee_id),
+    employee_code: emp ? emp.employee_code || '' : '',
     employee_name: emp ? emp.name : '',
     employee_email: emp ? emp.email : '',
+    employee_unit: emp ? emp.unit || '' : '',
+    employee_area: emp ? emp.area || '' : '',
     punch_in_at: doc.punch_in_at,
     punch_in_lat: doc.punch_in_lat,
     punch_in_lng: doc.punch_in_lng,
@@ -24,11 +34,16 @@ function formatAttendance(doc) {
 function createAttendanceRouter(io) {
   const router = express.Router();
 
-  // Admin: list all attendance / punch records
+  // Admin (unit-scoped) or Super Admin (all units): list attendance / punch records
   router.get('/', authenticate, requireAdmin, async (req, res) => {
     try {
-      const docs = await Attendance.find()
-        .populate('employee_id', 'name email')
+      const scope = await getAdminUnitScope(req.user);
+      const filter = {};
+      if (scope) {
+        filter.employee_id = { $in: scope.employeeIds };
+      }
+      const docs = await Attendance.find(filter)
+        .populate('employee_id', 'name email employee_code unit area')
         .sort({ punch_in_at: -1 })
         .limit(100)
         .lean();

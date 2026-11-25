@@ -1,12 +1,17 @@
 const express = require('express');
-const { Notification } = require('../db');
+const { Notification, getAdminUnitScope } = require('../db');
 const { authenticate, requireAdmin } = require('../auth');
 
 const router = express.Router();
 
 router.get('/', authenticate, requireAdmin, async (req, res) => {
   try {
-    const docs = await Notification.find().sort({ created_at: -1 }).limit(50).lean();
+    const scope = await getAdminUnitScope(req.user);
+    const filter = {};
+    if (scope) {
+      filter.employee_id = { $in: scope.employeeIds };
+    }
+    const docs = await Notification.find(filter).sort({ created_at: -1 }).limit(50).lean();
     const notifications = docs.map((doc) => ({
       id: String(doc._id),
       type: doc.type,

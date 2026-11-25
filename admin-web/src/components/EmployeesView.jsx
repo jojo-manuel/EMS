@@ -1,12 +1,16 @@
-import React, { useState } from 'react';
-import { api } from '../api';
+import React, { useState, useMemo } from 'react';
+import { api, UNITS } from '../api';
 
-export default function EmployeesView({ employees, onRefresh }) {
+export default function EmployeesView({ employees, currentUser, onRefresh }) {
+  const lockedUnit =
+    currentUser?.role === 'admin' && currentUser?.unit ? currentUser.unit.toUpperCase() : '';
+
+  const [unitFilter, setUnitFilter] = useState('ALL');
   const [form, setForm] = useState({
     employee_code: '',
     name: '',
     phone: '',
-    unit: '',
+    unit: lockedUnit || UNITS[0],
     area: '',
     password: '',
   });
@@ -15,6 +19,12 @@ export default function EmployeesView({ employees, onRefresh }) {
   const [createdCredentials, setCreatedCredentials] = useState(null);
   const [copied, setCopied] = useState(false);
 
+  const visibleEmployees = useMemo(() => {
+    if (lockedUnit) return employees;
+    if (unitFilter === 'ALL') return employees;
+    return employees.filter((e) => (e.unit || '').toUpperCase() === unitFilter);
+  }, [employees, lockedUnit, unitFilter]);
+
   async function handleAdd(e) {
     e.preventDefault();
     setError('');
@@ -22,9 +32,14 @@ export default function EmployeesView({ employees, onRefresh }) {
     setCreatedCredentials(null);
     setCopied(false);
     try {
-      const res = await api.createEmployee(form);
+      const payload = {
+        ...form,
+        unit: lockedUnit || form.unit,
+      };
+      const res = await api.createEmployee(payload);
       setCreatedCredentials({
         name: res.employee.name,
+        unit: res.employee.unit,
         username: res.credentials?.username || res.employee.employee_code,
         password: res.credentials?.password || form.password,
       });
@@ -32,7 +47,7 @@ export default function EmployeesView({ employees, onRefresh }) {
         employee_code: '',
         name: '',
         phone: '',
-        unit: '',
+        unit: lockedUnit || form.unit,
         area: '',
         password: '',
       });
@@ -46,7 +61,7 @@ export default function EmployeesView({ employees, onRefresh }) {
 
   function handleCopyCredentials() {
     if (!createdCredentials) return;
-    const text = `Employee: ${createdCredentials.name}\nUsername (Employee ID): ${createdCredentials.username}\nPassword: ${createdCredentials.password}`;
+    const text = `Employee: ${createdCredentials.name} (${createdCredentials.unit})\nUsername (Employee ID): ${createdCredentials.username}\nPassword: ${createdCredentials.password}`;
     navigator.clipboard?.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 3000);
@@ -65,10 +80,30 @@ export default function EmployeesView({ employees, onRefresh }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 20 }}>
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Employees ({employees.length})</h3>
-        {employees.length === 0 ? (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <h3 style={{ margin: 0 }}>
+            Employees ({visibleEmployees.length})
+            {lockedUnit ? ` — ${lockedUnit} Unit` : ''}
+          </h3>
+          {!lockedUnit && (
+            <select
+              value={unitFilter}
+              onChange={(e) => setUnitFilter(e.target.value)}
+              style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid #d1d5db', fontSize: 13 }}
+            >
+              <option value="ALL">All Units ({employees.length})</option>
+              {UNITS.map((u) => (
+                <option key={u} value={u}>
+                  {u}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        {visibleEmployees.length === 0 ? (
           <p style={{ color: '#6b7280', fontSize: 14 }}>
-            No employees added yet. Use the form on the right to create an employee with Employee ID, Name, Phone Number, Unit, and Area.
+            No employees found for this unit. Use the form on the right to create an employee.
           </p>
         ) : (
           <table className="table">
@@ -84,7 +119,7 @@ export default function EmployeesView({ employees, onRefresh }) {
               </tr>
             </thead>
             <tbody>
-              {employees.map((emp) => (
+              {visibleEmployees.map((emp) => (
                 <tr key={emp.id}>
                   <td>
                     <span className="badge badge-pending">{emp.employee_code || '—'}</span>
@@ -93,7 +128,9 @@ export default function EmployeesView({ employees, onRefresh }) {
                     <strong>{emp.name}</strong>
                   </td>
                   <td>{emp.phone || '—'}</td>
-                  <td>{emp.unit || '—'}</td>
+                  <td>
+                    <span className="badge badge-offline">{emp.unit || '—'}</span>
+                  </td>
                   <td>{emp.area || '—'}</td>
                   <td>
                     <span className={`badge ${emp.is_tracking ? 'badge-live' : 'badge-offline'}`}>
@@ -141,7 +178,7 @@ export default function EmployeesView({ employees, onRefresh }) {
               </button>
             </div>
             <p style={{ margin: '0 0 10px', fontSize: 12, color: '#047857' }}>
-              Share these mobile app login credentials with <strong>{createdCredentials.name}</strong>:
+              Share these mobile app login credentials with <strong>{createdCredentials.name}</strong> ({createdCredentials.unit}):
             </p>
             <div
               style={{
@@ -214,12 +251,21 @@ export default function EmployeesView({ employees, onRefresh }) {
           <div className="grid-2">
             <div className="field">
               <label>Unit *</label>
-              <input
-                value={form.unit}
-                onChange={(e) => setForm({ ...form, unit: e.target.value })}
-                placeholder="e.g., Unit 1"
-                required
-              />
+              {lockedUnit ? (
+                <input value={lockedUnit} disabled style={{ background: '#f3f4f6', fontWeight: 700 }} />
+              ) : (
+                <select
+                  value={form.unit}
+                  onChange={(e) => setForm({ ...form, unit: e.target.value })}
+                  required
+                >
+                  {UNITS.map((u) => (
+                    <option key={u} value={u}>
+                      {u}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
 
             <div className="field">
@@ -227,7 +273,7 @@ export default function EmployeesView({ employees, onRefresh }) {
               <input
                 value={form.area}
                 onChange={(e) => setForm({ ...form, area: e.target.value })}
-                placeholder="e.g., North Zone"
+                placeholder="e.g., City Center"
                 required
               />
             </div>

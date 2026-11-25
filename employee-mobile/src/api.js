@@ -25,15 +25,15 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
   getMyTasks: () => request('/api/tasks'),
-  completeTask: (id, notes) =>
+  completeTask: (id, notes, lat = null, lng = null) =>
     request(`/api/tasks/${id}/complete`, {
       method: 'PATCH',
-      body: JSON.stringify({ notes }),
+      body: JSON.stringify({ notes, lat, lng }),
     }),
-  rescheduleTask: (id, scheduled_start, scheduled_end, reason) =>
+  rescheduleTask: (id, scheduled_start, scheduled_end, reason, lat = null, lng = null) =>
     request(`/api/tasks/${id}/reschedule`, {
       method: 'PATCH',
-      body: JSON.stringify({ scheduled_start, scheduled_end, reason }),
+      body: JSON.stringify({ scheduled_start, scheduled_end, reason, lat, lng }),
     }),
   sendLocation: (lat, lng, accuracy = 0) =>
     request('/api/locations', {

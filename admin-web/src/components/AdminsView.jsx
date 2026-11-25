@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { api } from '../api';
+import { api, UNITS } from '../api';
 
 export default function AdminsView({ admins, currentUser, onRefresh }) {
   const [form, setForm] = useState({
     name: '',
     email: '',
     phone: '',
-    unit: '',
+    unit: UNITS[0],
     area: '',
     role: 'admin',
     password: '',
@@ -24,7 +24,7 @@ export default function AdminsView({ admins, currentUser, onRefresh }) {
         name: '',
         email: '',
         phone: '',
-        unit: '',
+        unit: UNITS[0],
         area: '',
         role: 'admin',
         password: '',
@@ -57,7 +57,8 @@ export default function AdminsView({ admins, currentUser, onRefresh }) {
               <th>Name</th>
               <th>Email</th>
               <th>Phone</th>
-              <th>Unit / Area</th>
+              <th>Assigned Unit</th>
+              <th>Area</th>
               <th>Role</th>
               <th>Actions</th>
             </tr>
@@ -68,7 +69,12 @@ export default function AdminsView({ admins, currentUser, onRefresh }) {
                 <td><strong>{adm.name}</strong></td>
                 <td>{adm.email}</td>
                 <td>{adm.phone || '—'}</td>
-                <td>{[adm.unit, adm.area].filter(Boolean).join(' · ') || '—'}</td>
+                <td>
+                  <span className="badge badge-offline">
+                    {adm.role === 'superadmin' ? 'ALL UNITS' : adm.unit || 'ALL UNITS'}
+                  </span>
+                </td>
+                <td>{adm.area || '—'}</td>
                 <td>
                   <span className={`badge ${adm.role === 'superadmin' ? 'badge-rescheduled' : 'badge-pending'}`}>
                     {adm.role === 'superadmin' ? '🛡️ Super Admin' : 'Admin'}
@@ -123,33 +129,43 @@ export default function AdminsView({ admins, currentUser, onRefresh }) {
           />
         </div>
 
-        <div className="grid-2">
-          <div className="field">
-            <label>Unit</label>
-            <input
-              value={form.unit}
-              onChange={(e) => setForm({ ...form, unit: e.target.value })}
-            />
-          </div>
-          <div className="field">
-            <label>Area</label>
-            <input
-              value={form.area}
-              onChange={(e) => setForm({ ...form, area: e.target.value })}
-            />
-          </div>
-        </div>
-
         <div className="field">
           <label>Role *</label>
           <select
             value={form.role}
             onChange={(e) => setForm({ ...form, role: e.target.value })}
           >
-            <option value="admin">Admin (Manages Employees & Tasks)</option>
-            <option value="superadmin">Super Admin (Full Access + Manages Admins)</option>
+            <option value="admin">Unit Admin (Sees Only Assigned Unit)</option>
+            <option value="superadmin">Super Admin (Sees All Units)</option>
           </select>
         </div>
+
+        {form.role === 'admin' && (
+          <div className="grid-2">
+            <div className="field">
+              <label>Assigned Unit *</label>
+              <select
+                value={form.unit}
+                onChange={(e) => setForm({ ...form, unit: e.target.value })}
+                required
+              >
+                {UNITS.map((u) => (
+                  <option key={u} value={u}>
+                    {u}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label>Area</label>
+              <input
+                value={form.area}
+                onChange={(e) => setForm({ ...form, area: e.target.value })}
+                placeholder="Optional area"
+              />
+            </div>
+          </div>
+        )}
 
         <div className="field">
           <label>Password *</label>

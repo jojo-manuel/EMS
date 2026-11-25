@@ -9,6 +9,7 @@ function signToken(user) {
       email: user.email,
       role: user.role,
       name: user.name,
+      unit: user.unit || '',
       employee_code: user.employee_code || '',
     },
     JWT_SECRET,

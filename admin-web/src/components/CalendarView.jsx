@@ -165,12 +165,39 @@ export default function CalendarView({ tasks, employees, onRefresh }) {
             {editingTask?.reschedule_reason && (
               <div className="error-banner" style={{ background: '#fffbeb', color: '#92400e', borderColor: '#fde68a' }}>
                 <strong>Reschedule reason:</strong> {editingTask.reschedule_reason}
+                {editingTask.rescheduled_lat != null && (
+                  <div style={{ marginTop: 4, fontSize: 12 }}>
+                    📍 Rescheduled at GPS:{' '}
+                    <a
+                      href={`https://www.google.com/maps?q=${editingTask.rescheduled_lat},${editingTask.rescheduled_lng}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: '#b45309', fontWeight: 700 }}
+                    >
+                      {Number(editingTask.rescheduled_lat).toFixed(5)}, {Number(editingTask.rescheduled_lng).toFixed(5)} (View on Map)
+                    </a>
+                  </div>
+                )}
               </div>
             )}
 
             {editingTask?.completion_notes && (
               <div className="error-banner" style={{ background: '#ecfdf5', color: '#065f46', borderColor: '#a7f3d0' }}>
                 <strong>Completion notes:</strong> {editingTask.completion_notes}
+              </div>
+            )}
+
+            {editingTask?.completed_lat != null && (
+              <div className="error-banner" style={{ background: '#ecfdf5', color: '#065f46', borderColor: '#a7f3d0' }}>
+                📍 <strong>Marked Complete at GPS:</strong>{' '}
+                <a
+                  href={`https://www.google.com/maps?q=${editingTask.completed_lat},${editingTask.completed_lng}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: '#047857', fontWeight: 700 }}
+                >
+                  {Number(editingTask.completed_lat).toFixed(5)}, {Number(editingTask.completed_lng).toFixed(5)} (View on Map)
+                </a>
               </div>
             )}
 

@@ -16,6 +16,8 @@ function verifyPassword(password, stored) {
   return crypto.timingSafeEqual(derived, keyBuf);
 }
 
+const UNITS = ['KOZHIKODE', 'KOCHI', 'TRIVANDRUM', 'KANNUR', 'THRISSUR', 'KOTTAYAM'];
+
 const userSchema = new mongoose.Schema(
   {
     employee_code: { type: String, default: '', trim: true },
@@ -45,8 +47,13 @@ const taskSchema = new mongoose.Schema(
       default: 'pending',
     },
     reschedule_reason: { type: String, default: '' },
+    rescheduled_lat: { type: Number, default: null },
+    rescheduled_lng: { type: Number, default: null },
+    rescheduled_at: { type: Date, default: null },
     completion_notes: { type: String, default: '' },
     completed_at: { type: Date, default: null },
+    completed_lat: { type: Number, default: null },
+    completed_lng: { type: Number, default: null },
   },
   { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } }
 );
@@ -158,8 +165,31 @@ async function connectAndSeed() {
   return connectPromise;
 }
 
+async function getAdminUnitScope(reqUser) {
+  if (!reqUser || reqUser.role === 'superadmin') {
+    return null; // Super Admin sees all units
+  }
+  const adminDoc = await User.findById(reqUser.id).select('role unit').lean();
+  if (!adminDoc || adminDoc.role === 'superadmin' || !adminDoc.unit) {
+    return null;
+  }
+  const unitUpper = adminDoc.unit.trim().toUpperCase();
+  const unitEmployees = await User.find({
+    role: 'employee',
+    unit: new RegExp(`^${unitUpper}$`, 'i'),
+  })
+    .select('_id')
+    .lean();
+  return {
+    unit: unitUpper,
+    employeeIds: unitEmployees.map((e) => e._id),
+  };
+}
+
 module.exports = {
+  UNITS,
   connectAndSeed,
+  getAdminUnitScope,
   hashPassword,
   verifyPassword,
   User,

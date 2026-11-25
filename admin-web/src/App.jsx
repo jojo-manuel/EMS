@@ -150,7 +150,9 @@ export default function App() {
         <div className="sidebar-footer">
           <div style={{ marginBottom: 6 }}>
             <span className={`badge ${user.role === 'superadmin' ? 'badge-rescheduled' : 'badge-pending'}`}>
-              {user.role === 'superadmin' ? '🛡️ SUPER ADMIN' : 'ADMIN'}
+              {user.role === 'superadmin'
+                ? '🛡️ SUPER ADMIN · ALL UNITS'
+                : `ADMIN${user.unit ? ` · ${user.unit}` : ''}`}
             </span>
           </div>
           <div style={{ color: '#fff', fontWeight: 600 }}>{user.name}</div>
@@ -171,9 +173,13 @@ export default function App() {
           {tab === 'calendar' && (
             <CalendarView tasks={tasks} employees={employees} onRefresh={loadAll} />
           )}
-          {tab === 'map' && <LiveMapView locations={locations} />}
+          {tab === 'map' && (
+            <LiveMapView locations={locations} tasks={tasks} currentUser={user} />
+          )}
           {tab === 'attendance' && <AttendanceView records={attendance} />}
-          {tab === 'employees' && <EmployeesView employees={employees} onRefresh={loadAll} />}
+          {tab === 'employees' && (
+            <EmployeesView employees={employees} currentUser={user} onRefresh={loadAll} />
+          )}
           {tab === 'admins' && user.role === 'superadmin' && (
             <AdminsView admins={admins} currentUser={user} onRefresh={loadAll} />
           )}

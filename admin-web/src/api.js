@@ -1,4 +1,5 @@
 export const API_URL = import.meta.env.VITE_API_URL || '';
+export const UNITS = ['KOZHIKODE', 'KOCHI', 'TRIVANDRUM', 'KANNUR', 'THRISSUR', 'KOTTAYAM'];
 
 export function getToken() {
   return localStorage.getItem('emptracker_token');
@@ -83,6 +84,8 @@ export const api = {
       method: 'DELETE',
     }),
   getLocations: () => request('/api/locations'),
+  getLocationHistory: (employeeId, date = 'all') =>
+    request(`/api/locations/${employeeId}/history?date=${encodeURIComponent(date)}`),
   getAttendance: () => request('/api/attendance'),
   getNotifications: () => request('/api/notifications'),
   markNotificationRead: (id) =>

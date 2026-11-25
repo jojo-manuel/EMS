@@ -1,21 +1,35 @@
 const express = require('express');
 const {
+  UNITS,
   User,
   Task,
   EmployeeLocation,
   LocationHistory,
   Attendance,
   Notification,
+  getAdminUnitScope,
   hashPassword,
 } = require('../db');
 const { authenticate, requireAdmin, requireSuperAdmin } = require('../auth');
 
 const router = express.Router();
 
-// Admin or Super Admin: list all employees
+router.get('/units', authenticate, (req, res) => {
+  return res.json({ units: UNITS });
+});
+
+// Admin (unit-scoped) or Super Admin (all units): list employees
 router.get('/employees', authenticate, requireAdmin, async (req, res) => {
   try {
-    const employees = await User.find({ role: 'employee' }).sort({ name: 1 }).lean();
+    const scope = await getAdminUnitScope(req.user);
+    const filter = { role: 'employee' };
+    if (scope) {
+      filter._id = { $in: scope.employeeIds };
+    } else if (req.query.unit) {
+      filter.unit = new RegExp(`^${String(req.query.unit).trim()}$`, 'i');
+    }
+
+    const employees = await User.find(filter).sort({ name: 1 }).lean();
     const locs = await EmployeeLocation.find({
       employee_id: { $in: employees.map((e) => e._id) },
     }).lean();
@@ -42,7 +56,7 @@ router.get('/employees', authenticate, requireAdmin, async (req, res) => {
       };
     });
 
-    return res.json({ employees: rows });
+    return res.json({ employees: rows, units: UNITS });
   } catch (err) {
     return res.status(500).json({ error: 'Failed to fetch employees' });
   }
@@ -60,13 +74,17 @@ router.post('/employees', authenticate, requireAdmin, async (req, res) => {
     password = '',
   } = req.body || {};
 
-  if (!employee_code.trim() || !name || !phone.trim() || !unit.trim() || !area.trim()) {
-    return res.status(400).json({
-      error: 'Employee ID, Name, Phone Number, Unit, and Area are required',
-    });
-  }
-
   try {
+    const scope = await getAdminUnitScope(req.user);
+    // If the logged-in Admin belongs to a specific unit, enforce that unit
+    const effectiveUnit = scope ? scope.unit : unit.trim().toUpperCase();
+
+    if (!employee_code.trim() || !name || !phone.trim() || !effectiveUnit || !area.trim()) {
+      return res.status(400).json({
+        error: 'Employee ID, Name, Phone Number, Unit, and Area are required',
+      });
+    }
+
     const cleanCode = employee_code.trim();
     const existingCode = await User.findOne({
       employee_code: new RegExp(`^${cleanCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'),
@@ -88,7 +106,7 @@ router.post('/employees', authenticate, requireAdmin, async (req, res) => {
       name: name.trim(),
       email: finalEmail,
       phone: phone.trim(),
-      unit: unit.trim(),
+      unit: effectiveUnit,
       area: area.trim(),
       password_hash: hashPassword(finalPassword),
       role: 'employee',
@@ -119,10 +137,15 @@ router.post('/employees', authenticate, requireAdmin, async (req, res) => {
   }
 });
 
-// Admin or Super Admin: delete an employee
+// Admin or Super Admin: delete an employee (Admin can only delete within their unit)
 router.delete('/employees/:id', authenticate, requireAdmin, async (req, res) => {
   try {
     const empId = req.params.id;
+    const scope = await getAdminUnitScope(req.user);
+    if (scope && !scope.employeeIds.some((id) => String(id) === String(empId))) {
+      return res.status(403).json({ error: 'You can only manage employees in your assigned unit' });
+    }
+
     const deleted = await User.findOneAndDelete({ _id: empId, role: 'employee' });
     if (!deleted) {
       return res.status(404).json({ error: 'Employee not found' });
@@ -157,26 +180,30 @@ router.get('/admins', authenticate, requireSuperAdmin, async (req, res) => {
         role: a.role,
         created_at: a.created_at,
       })),
+      units: UNITS,
     });
   } catch (err) {
     return res.status(500).json({ error: 'Failed to load admins' });
   }
 });
 
-// Super Admin: create a new Admin (or Super Admin)
+// Super Admin: create a new Admin (assigned to a Unit) or Super Admin
 router.post('/admins', authenticate, requireSuperAdmin, async (req, res) => {
   const { name, email, phone = '', unit = '', area = '', password, role = 'admin' } = req.body || {};
   if (!name || !email || !password) {
     return res.status(400).json({ error: 'Name, email, and password are required' });
   }
   const targetRole = role === 'superadmin' ? 'superadmin' : 'admin';
+  if (targetRole === 'admin' && !unit.trim()) {
+    return res.status(400).json({ error: 'Please select a Unit for the Admin' });
+  }
 
   try {
     const created = await User.create({
       name: name.trim(),
       email: email.trim().toLowerCase(),
       phone: phone.trim(),
-      unit: unit.trim(),
+      unit: targetRole === 'superadmin' ? '' : unit.trim().toUpperCase(),
       area: area.trim(),
       password_hash: hashPassword(password),
       role: targetRole,
