@@ -1,5 +1,13 @@
 const express = require('express');
-const { User, EmployeeLocation, hashPassword } = require('../db');
+const {
+  User,
+  Task,
+  EmployeeLocation,
+  LocationHistory,
+  Attendance,
+  Notification,
+  hashPassword,
+} = require('../db');
 const { authenticate, requireAdmin } = require('../auth');
 
 const router = express.Router();
@@ -66,6 +74,26 @@ router.post('/employees', authenticate, requireAdmin, async (req, res) => {
       return res.status(409).json({ error: 'An account with this email already exists' });
     }
     return res.status(500).json({ error: 'Failed to create employee' });
+  }
+});
+
+router.delete('/employees/:id', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const empId = req.params.id;
+    const deleted = await User.findOneAndDelete({ _id: empId, role: 'employee' });
+    if (!deleted) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+    await Promise.all([
+      Task.deleteMany({ assigned_to: empId }),
+      EmployeeLocation.deleteMany({ employee_id: empId }),
+      LocationHistory.deleteMany({ employee_id: empId }),
+      Attendance.deleteMany({ employee_id: empId }),
+      Notification.deleteMany({ employee_id: empId }),
+    ]);
+    return res.json({ deleted: true, id: empId });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to delete employee' });
   }
 });
 

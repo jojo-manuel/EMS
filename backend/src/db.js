@@ -104,82 +104,15 @@ async function seedDatabase() {
   const existingAdmin = await User.findOne({ role: 'admin' });
   if (existingAdmin) return;
 
-  const admin = await User.create({
-    name: 'Admin Manager',
+  await User.create({
+    name: 'Admin',
     email: 'admin@emptracker.com',
-    phone: '+1-555-0100',
+    phone: '',
     password_hash: hashPassword('admin123'),
     role: 'admin',
   });
 
-  const emp1 = await User.create({
-    name: 'Alex Rivera',
-    email: 'alex@emptracker.com',
-    phone: '+1-555-0101',
-    password_hash: hashPassword('emp123'),
-    role: 'employee',
-  });
-
-  const emp2 = await User.create({
-    name: 'Priya Sharma',
-    email: 'priya@emptracker.com',
-    phone: '+1-555-0102',
-    password_hash: hashPassword('emp123'),
-    role: 'employee',
-  });
-
-  const emp3 = await User.create({
-    name: 'Marcus Chen',
-    email: 'marcus@emptracker.com',
-    phone: '+1-555-0103',
-    password_hash: hashPassword('emp123'),
-    role: 'employee',
-  });
-
-  await EmployeeLocation.insertMany([
-    { employee_id: emp1._id, lat: 12.9716, lng: 77.5946, accuracy: 12, is_tracking: 1 },
-    { employee_id: emp2._id, lat: 12.9352, lng: 77.6245, accuracy: 15, is_tracking: 1 },
-    { employee_id: emp3._id, lat: 12.9912, lng: 77.5712, accuracy: 20, is_tracking: 0 },
-  ]);
-
-  const now = new Date();
-  const makeIso = (dayOffset, hour, min = 0) =>
-    new Date(now.getFullYear(), now.getMonth(), now.getDate() + dayOffset, hour, min, 0).toISOString();
-
-  await Task.insertMany([
-    {
-      title: 'HVAC Inspection - Tech Park',
-      description: 'Inspect rooftop unit #3 and replace air filter.',
-      address: '100 MG Road, Tower A',
-      assigned_to: emp1._id,
-      created_by: admin._id,
-      scheduled_start: makeIso(0, 10, 0),
-      scheduled_end: makeIso(0, 12, 0),
-      status: 'pending',
-    },
-    {
-      title: 'Fiber Router Installation',
-      description: 'Install and test commercial fiber router for client onboarding.',
-      address: '42 Koramangala 4th Block',
-      assigned_to: emp2._id,
-      created_by: admin._id,
-      scheduled_start: makeIso(0, 13, 0),
-      scheduled_end: makeIso(0, 15, 0),
-      status: 'pending',
-    },
-    {
-      title: 'Quarterly Security Audit',
-      description: 'Verify camera feeds and badge access logs.',
-      address: '88 Indiranagar 100ft Rd',
-      assigned_to: emp3._id,
-      created_by: admin._id,
-      scheduled_start: makeIso(1, 10, 30),
-      scheduled_end: makeIso(1, 12, 30),
-      status: 'pending',
-    },
-  ]);
-
-  console.log('Seeded default MongoDB accounts: admin@emptracker.com / admin123, alex@emptracker.com / emp123');
+  console.log('Initialized default admin account: admin@emptracker.com');
 }
 
 let connectPromise = null;

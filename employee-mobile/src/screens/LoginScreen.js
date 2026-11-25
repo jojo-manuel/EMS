@@ -14,8 +14,8 @@ import { getServerUrl, setServerUrl } from '../config';
 
 export default function LoginScreen({ onLogin }) {
   const [serverUrl, setServerUrlInput] = useState('');
-  const [email, setEmail] = useState('alex@emptracker.com');
-  const [password, setPassword] = useState('emp123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -48,13 +48,13 @@ export default function LoginScreen({ onLogin }) {
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
-        <Text style={styles.label}>Backend Server URL (PC Wi-Fi IP for phone)</Text>
+        <Text style={styles.label}>Backend Server URL</Text>
         <TextInput
           style={styles.input}
           value={serverUrl}
           onChangeText={setServerUrlInput}
           autoCapitalize="none"
-          placeholder="http://192.168.1.5:4000"
+          placeholder="https://your-project.vercel.app"
         />
 
         <Text style={styles.label}>Employee Email</Text>
@@ -64,6 +64,7 @@ export default function LoginScreen({ onLogin }) {
           onChangeText={setEmail}
           autoCapitalize="none"
           keyboardType="email-address"
+          placeholder="Enter your work email"
         />
 
         <Text style={styles.label}>Password</Text>
@@ -72,6 +73,7 @@ export default function LoginScreen({ onLogin }) {
           value={password}
           onChangeText={setPassword}
           secureTextEntry
+          placeholder="Enter your password"
         />
 
         <TouchableOpacity style={styles.button} onPress={handleSubmit} disabled={loading}>
@@ -81,8 +83,6 @@ export default function LoginScreen({ onLogin }) {
             <Text style={styles.buttonText}>Sign In</Text>
           )}
         </TouchableOpacity>
-
-        <Text style={styles.hint}>Demo: alex@emptracker.com / emp123</Text>
       </View>
     </KeyboardAvoidingView>
   );
@@ -143,11 +143,5 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 14,
     fontSize: 13,
-  },
-  hint: {
-    marginTop: 14,
-    textAlign: 'center',
-    color: '#6b7280',
-    fontSize: 12,
   },
 });

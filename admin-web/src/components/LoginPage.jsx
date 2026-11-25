@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { api } from '../api';
 
 export default function LoginPage({ onLogin }) {
-  const [email, setEmail] = useState('admin@emptracker.com');
-  const [password, setPassword] = useState('admin123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -38,6 +38,7 @@ export default function LoginPage({ onLogin }) {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            placeholder="admin@emptracker.com"
             required
           />
         </div>
@@ -48,6 +49,7 @@ export default function LoginPage({ onLogin }) {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            placeholder="Enter password"
             required
           />
         </div>
@@ -55,10 +57,6 @@ export default function LoginPage({ onLogin }) {
         <button className="btn btn-primary" style={{ width: '100%' }} disabled={loading}>
           {loading ? 'Signing in...' : 'Sign In'}
         </button>
-
-        <p style={{ marginTop: 16, marginBottom: 0, fontSize: 12 }}>
-          Default demo login: <code>admin@emptracker.com</code> / <code>admin123</code>
-        </p>
       </form>
     </div>
   );

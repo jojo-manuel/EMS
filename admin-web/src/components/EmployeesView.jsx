@@ -21,34 +21,61 @@ export default function EmployeesView({ employees, onRefresh }) {
     }
   }
 
+  async function handleDelete(emp) {
+    if (!window.confirm(`Remove employee "${emp.name}" and their assigned data?`)) return;
+    try {
+      await api.deleteEmployee(emp.id);
+      onRefresh();
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 20 }}>
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Team Members ({employees.length})</h3>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Email</th>
-              <th>Phone</th>
-              <th>Tracking Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {employees.map((emp) => (
-              <tr key={emp.id}>
-                <td><strong>{emp.name}</strong></td>
-                <td>{emp.email}</td>
-                <td>{emp.phone || '—'}</td>
-                <td>
-                  <span className={`badge ${emp.is_tracking ? 'badge-live' : 'badge-offline'}`}>
-                    {emp.is_tracking ? '● Live' : 'Offline'}
-                  </span>
-                </td>
+        {employees.length === 0 ? (
+          <p style={{ color: '#6b7280', fontSize: 14 }}>
+            No employees added yet. Use the form on the right to create your first employee account.
+          </p>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Tracking Status</th>
+                <th>Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {employees.map((emp) => (
+                <tr key={emp.id}>
+                  <td><strong>{emp.name}</strong></td>
+                  <td>{emp.email}</td>
+                  <td>{emp.phone || '—'}</td>
+                  <td>
+                    <span className={`badge ${emp.is_tracking ? 'badge-live' : 'badge-offline'}`}>
+                      {emp.is_tracking ? '● Live' : 'Offline'}
+                    </span>
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="btn btn-danger"
+                      style={{ padding: '5px 10px', fontSize: 12 }}
+                      onClick={() => handleDelete(emp)}
+                    >
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <form className="card" onSubmit={handleAdd} style={{ alignSelf: 'start' }}>
@@ -79,7 +106,7 @@ export default function EmployeesView({ employees, onRefresh }) {
           />
         </div>
         <div className="field">
-          <label>Temporary Password</label>
+          <label>Password</label>
           <input
             type="password"
             value={form.password}
