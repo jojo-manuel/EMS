@@ -40,19 +40,24 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ lat, lng, accuracy, is_tracking: 1 }),
     }),
+  sendLocationBatch: (locations) =>
+    request('/api/locations/batch', {
+      method: 'POST',
+      body: JSON.stringify({ locations }),
+    }),
   stopTracking: () =>
     request('/api/locations/stop', {
       method: 'POST',
     }),
   getAttendanceStatus: () => request('/api/attendance/status'),
-  punchIn: (lat, lng, accuracy = 0, verified_by = 'fingerprint') =>
+  punchIn: (lat, lng, accuracy = 0, verified_by = 'fingerprint', security = {}) =>
     request('/api/attendance/punch-in', {
       method: 'POST',
-      body: JSON.stringify({ lat, lng, accuracy, verified_by }),
+      body: JSON.stringify({ lat, lng, accuracy, verified_by, security }),
     }),
-  punchOut: (lat, lng, verified_by = 'fingerprint') =>
+  punchOut: (lat, lng, verified_by = 'fingerprint', reason = '', punch_out_at = null) =>
     request('/api/attendance/punch-out', {
       method: 'POST',
-      body: JSON.stringify({ lat, lng, verified_by }),
+      body: JSON.stringify({ lat, lng, verified_by, reason, punch_out_at }),
     }),
 };

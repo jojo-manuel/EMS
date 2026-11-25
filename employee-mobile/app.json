@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "EmpTracker Employee",
-    "slug": "emptracker-employee",
+    "slug": "jojo",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
@@ -10,7 +10,9 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "EmpTracker needs your location to share live progress with your admin during active shifts.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "EmpTracker needs background location access to keep tracking active while you travel between assigned tasks.",
-        "UIBackgroundModes": ["location"]
+        "UIBackgroundModes": [
+          "location"
+        ]
       }
     },
     "android": {
@@ -20,7 +22,14 @@
         "ACCESS_FINE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION",
         "FOREGROUND_SERVICE",
-        "FOREGROUND_SERVICE_LOCATION"
+        "FOREGROUND_SERVICE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
+        "android.permission.POST_NOTIFICATIONS"
       ]
     },
     "plugins": [
@@ -32,6 +41,12 @@
           "isAndroidForegroundServiceEnabled": true
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "6b098d08-6412-4c4c-a2c6-20e036aba191"
+      }
+    },
+    "owner": "jomapss-team"
   }
 }

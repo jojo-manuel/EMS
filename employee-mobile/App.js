@@ -1,13 +1,22 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { SafeAreaView, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { SafeAreaView, View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as LocalAuthentication from 'expo-local-authentication';
 import { StatusBar } from 'expo-status-bar';
 import { io } from 'socket.io-client';
 import { api } from './src/api';
 import { clearAuthData, getAuthData, getServerUrl, saveAuthData } from './src/config';
-import { startLiveTracking, stopLiveTracking } from './src/locationTask';
+import {
+  startLiveTracking,
+  stopLiveTracking,
+  flushOfflineLocations,
+  flushPendingAutoPunchOut,
+} from './src/locationTask';
 import LoginScreen from './src/screens/LoginScreen';
 import ScheduleScreen from './src/screens/ScheduleScreen';
 import TrackingScreen from './src/screens/TrackingScreen';
+
+const BIOMETRIC_SETUP_KEY = 'emptracker_biometric_setup_done';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -20,14 +29,59 @@ export default function App() {
   const [activePunch, setActivePunch] = useState(null);
   const [punchHistory, setPunchHistory] = useState([]);
 
-  useEffect(() => {
-    getAuthData().then(({ token: t, user: u }) => {
-      if (t && u) {
-        setToken(t);
-        setUser(u);
+  // App-wide Fingerprint Lock state (Initial setup + every app launch)
+  const [appUnlocked, setAppUnlocked] = useState(false);
+  const [isInitialSetup, setIsInitialSetup] = useState(false);
+  const [lockError, setLockError] = useState('');
+
+  const promptFingerprintUnlock = useCallback(async (setupMode = false) => {
+    setLockError('');
+    try {
+      const [hasHardware, isEnrolled] = await Promise.all([
+        LocalAuthentication.hasHardwareAsync(),
+        LocalAuthentication.isEnrolledAsync(),
+      ]);
+
+      if (!hasHardware || !isEnrolled) {
+        setLockError(
+          'Fingerprint is not set up on this phone. Please enroll a fingerprint in your device settings to unlock EmpTracker.'
+        );
+        return;
       }
-    });
+
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: setupMode
+          ? 'Initial Setup: Verify Fingerprint to Lock & Secure App'
+          : 'EmpTracker Locked: Scan Fingerprint to Unlock',
+        cancelLabel: 'Cancel',
+        disableDeviceFallback: true,
+      });
+
+      if (result.success) {
+        await AsyncStorage.setItem(BIOMETRIC_SETUP_KEY, 'true');
+        setIsInitialSetup(false);
+        setAppUnlocked(true);
+      } else {
+        setLockError('Fingerprint verification required to access the app.');
+      }
+    } catch (err) {
+      setLockError(err.message || 'Biometric authentication failed.');
+    }
   }, []);
+
+  useEffect(() => {
+    Promise.all([getAuthData(), AsyncStorage.getItem(BIOMETRIC_SETUP_KEY)]).then(
+      ([{ token: t, user: u }, setupDone]) => {
+        if (t && u) {
+          setToken(t);
+          setUser(u);
+        }
+        const firstTime = !setupDone;
+        setIsInitialSetup(firstTime);
+        promptFingerprintUnlock(firstTime);
+      }
+    );
+  }, [promptFingerprintUnlock]);
 
   const loadTasks = useCallback(async () => {
     if (!token) return;
@@ -45,6 +99,8 @@ export default function App() {
   const loadAttendance = useCallback(async () => {
     if (!token) return;
     try {
+      await flushPendingAutoPunchOut();
+      await flushOfflineLocations();
       const res = await api.getAttendanceStatus();
       setActivePunch(res.active || null);
       setPunchHistory(res.history || []);
@@ -67,7 +123,7 @@ export default function App() {
   }, [token]);
 
   useEffect(() => {
-    if (!token) return;
+    if (!token || !appUnlocked) return;
     loadTasks();
     loadAttendance();
 
@@ -82,7 +138,7 @@ export default function App() {
     return () => {
       if (socket) socket.disconnect();
     };
-  }, [token, loadTasks, loadAttendance]);
+  }, [token, appUnlocked, loadTasks, loadAttendance]);
 
   async function handleLogin(newToken, newUser) {
     await saveAuthData(newToken, newUser);
@@ -92,13 +148,44 @@ export default function App() {
 
   async function handleLogout() {
     if (isTracking) {
-      await stopLiveTracking().catch(() => {});
-      setIsTracking(false);
+      Alert.alert('Shift Active', 'Please Punch Out with your fingerprint before signing out.');
+      return;
     }
     await clearAuthData();
     setToken(null);
     setUser(null);
     setActivePunch(null);
+  }
+
+  // Full-Screen Fingerprint App Lock (Initial Setup & App Launch)
+  if (!appUnlocked) {
+    return (
+      <SafeAreaView style={styles.lockScreen}>
+        <StatusBar style="light" />
+        <View style={styles.lockCard}>
+          <Text style={styles.lockIcon}>👆</Text>
+          <Text style={styles.lockTitle}>
+            {isInitialSetup ? 'Initial Fingerprint Setup' : 'EmpTracker App Locked'}
+          </Text>
+          <Text style={styles.lockSub}>
+            {isInitialSetup
+              ? 'For security, EmpTracker requires fingerprint verification during initial setup and whenever you open the app.'
+              : 'Verify your fingerprint to unlock and access your work schedule and shift tracker.'}
+          </Text>
+
+          {lockError ? <Text style={styles.lockError}>{lockError}</Text> : null}
+
+          <TouchableOpacity
+            style={styles.unlockBtn}
+            onPress={() => promptFingerprintUnlock(isInitialSetup)}
+          >
+            <Text style={styles.unlockBtnText}>
+              {isInitialSetup ? 'Verify & Enable Fingerprint Lock' : 'Scan Fingerprint to Unlock'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
   }
 
   if (!token || !user) {
@@ -120,9 +207,14 @@ export default function App() {
             {isTracking ? '● Punched In · Live Tracking' : 'Punched Out'}
           </Text>
         </View>
-        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-          <Text style={styles.logoutText}>Sign Out</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <TouchableOpacity style={styles.logoutBtn} onPress={() => setAppUnlocked(false)}>
+            <Text style={styles.logoutText}>🔒 Lock</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
+            <Text style={styles.logoutText}>Sign Out</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={{ flex: 1 }}>
@@ -166,6 +258,38 @@ export default function App() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#fff' },
+  lockScreen: {
+    flex: 1,
+    backgroundColor: '#0f172a',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  lockCard: {
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    padding: 28,
+    alignItems: 'center',
+  },
+  lockIcon: { fontSize: 48, marginBottom: 12 },
+  lockTitle: { fontSize: 22, fontWeight: '800', color: '#111827', marginBottom: 8, textAlign: 'center' },
+  lockSub: { fontSize: 14, color: '#6b7280', textAlign: 'center', marginBottom: 20, lineHeight: 20 },
+  lockError: {
+    backgroundColor: '#fef2f2',
+    color: '#b91c1c',
+    padding: 10,
+    borderRadius: 8,
+    fontSize: 13,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  unlockBtn: {
+    backgroundColor: '#2563eb',
+    width: '100%',
+    paddingVertical: 15,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  unlockBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',

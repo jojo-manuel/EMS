@@ -26,7 +26,7 @@ export default function AttendanceView({ records }) {
               <th>Punch In</th>
               <th>Punch Out</th>
               <th>Duration</th>
-              <th>Verification</th>
+              <th>Verification / Notes</th>
             </tr>
           </thead>
           <tbody>
@@ -45,7 +45,14 @@ export default function AttendanceView({ records }) {
                 <td>{r.punch_out_at ? new Date(r.punch_out_at).toLocaleString() : 'Active shift'}</td>
                 <td>{formatDuration(r.punch_in_at, r.punch_out_at)}</td>
                 <td>
-                  <span className="badge badge-pending">👆 {r.verified_by}</span>
+                  <span className={`badge ${r.verified_by === 'auto_gps_off' ? 'badge-rescheduled' : 'badge-pending'}`}>
+                    {r.verified_by === 'auto_gps_off' ? '⚠ Auto (GPS Off)' : `👆 ${r.verified_by}`}
+                  </span>
+                  {r.punch_out_reason ? (
+                    <div style={{ fontSize: 11, color: '#b45309', marginTop: 4 }}>
+                      {r.punch_out_reason}
+                    </div>
+                  ) : null}
                 </td>
               </tr>
             ))}

@@ -16,6 +16,7 @@ function formatAttendance(doc) {
     punch_out_lat: doc.punch_out_lat,
     punch_out_lng: doc.punch_out_lng,
     verified_by: doc.verified_by || 'fingerprint',
+    punch_out_reason: doc.punch_out_reason || '',
     status: doc.status,
   };
 }
@@ -61,16 +62,39 @@ function createAttendanceRouter(io) {
     }
   });
 
-  // Employee: Punch In (fingerprint verified) + start live tracking
+  // Employee: Punch In (fingerprint verified + VPN / Mock GPS / App Layout checks)
   router.post('/punch-in', authenticate, async (req, res) => {
     try {
-      const { lat = null, lng = null, accuracy = 0, verified_by = 'fingerprint' } = req.body || {};
+      const {
+        lat = null,
+        lng = null,
+        accuracy = 0,
+        verified_by = 'fingerprint',
+        security = {},
+      } = req.body || {};
+
+      if (security.is_vpn) {
+        return res.status(403).json({
+          error: 'Punch-In blocked: VPN connection detected. Please turn off VPN and try again.',
+        });
+      }
+      if (security.is_mock_location) {
+        return res.status(403).json({
+          error: 'Punch-In blocked: Mock / Fake GPS location detected.',
+        });
+      }
+      if (security.is_overlay_layout) {
+        return res.status(403).json({
+          error: 'Punch-In blocked: Split-screen or overlay app layout detected. Use full screen.',
+        });
+      }
+
       const employeeId = req.user.id;
 
       // Close any stale open punch if one exists
       await Attendance.updateMany(
         { employee_id: employeeId, status: 'punched_in' },
-        { status: 'punched_out', punch_out_at: new Date() }
+        { status: 'punched_out', punch_out_at: new Date(), punch_out_reason: 'Replaced by new shift' }
       );
 
       const now = new Date();
@@ -143,12 +167,18 @@ function createAttendanceRouter(io) {
     }
   });
 
-  // Employee: Punch Out (fingerprint verified) + stop live tracking
+  // Employee: Punch Out (manual fingerprint OR automatic when GPS is turned off)
   router.post('/punch-out', authenticate, async (req, res) => {
     try {
-      const { lat = null, lng = null, verified_by = 'fingerprint' } = req.body || {};
+      const {
+        lat = null,
+        lng = null,
+        verified_by = 'fingerprint',
+        reason = '',
+        punch_out_at = null,
+      } = req.body || {};
       const employeeId = req.user.id;
-      const now = new Date();
+      const outTime = punch_out_at ? new Date(punch_out_at) : new Date();
 
       const active = await Attendance.findOne({
         employee_id: employeeId,
@@ -159,15 +189,17 @@ function createAttendanceRouter(io) {
         return res.status(400).json({ error: 'No active punch-in shift found' });
       }
 
-      active.punch_out_at = now;
+      active.punch_out_at = outTime;
       active.punch_out_lat = lat;
       active.punch_out_lng = lng;
+      active.verified_by = verified_by;
+      active.punch_out_reason = reason;
       active.status = 'punched_out';
       await active.save();
 
       const loc = await EmployeeLocation.findOneAndUpdate(
         { employee_id: employeeId },
-        { is_tracking: 0, updated_at: now },
+        { is_tracking: 0, updated_at: new Date() },
         { returnDocument: 'after' }
       ).lean();
 
@@ -182,13 +214,21 @@ function createAttendanceRouter(io) {
         lng: loc ? loc.lng : lng,
         accuracy: loc ? loc.accuracy : 0,
         is_tracking: 0,
-        updated_at: now,
+        updated_at: new Date(),
       });
+
+      const isAutoGps = verified_by === 'auto_gps_off' || reason.toLowerCase().includes('gps');
+      const notifTitle = isAutoGps
+        ? `⚠ Auto Punch-Out (GPS Off): ${user.name}`
+        : `Punched Out: ${user.name}`;
+      const notifMsg = isAutoGps
+        ? `${user.name} was automatically punched out at ${outTime.toLocaleTimeString()} because GPS was turned off.`
+        : `${user.name} punched out via ${verified_by} at ${outTime.toLocaleTimeString()}. Live tracking stopped.`;
 
       const notifDoc = await Notification.create({
         type: 'punch_out',
-        title: `Punched Out: ${user.name}`,
-        message: `${user.name} punched out via ${verified_by} at ${now.toLocaleTimeString()}. Live tracking stopped.`,
+        title: notifTitle,
+        message: notifMsg,
         employee_id: employeeId,
       });
 

@@ -85,6 +85,64 @@ function createLocationsRouter(io) {
     }
   });
 
+  // Bulk upload queued offline GPS coordinates when employee comes back online
+  router.post('/batch', authenticate, async (req, res) => {
+    try {
+      const { locations = [] } = req.body || {};
+      if (!Array.isArray(locations) || locations.length === 0) {
+        return res.json({ synced: 0 });
+      }
+
+      const employeeId = req.user.id;
+      const valid = locations
+        .filter((pt) => typeof pt.lat === 'number' && typeof pt.lng === 'number')
+        .map((pt) => ({
+          employee_id: employeeId,
+          lat: pt.lat,
+          lng: pt.lng,
+          accuracy: pt.accuracy || 0,
+          recorded_at: pt.recorded_at ? new Date(pt.recorded_at) : new Date(),
+        }))
+        .sort((a, b) => a.recorded_at - b.recorded_at);
+
+      if (valid.length === 0) {
+        return res.json({ synced: 0 });
+      }
+
+      await LocationHistory.insertMany(valid);
+
+      const latest = valid[valid.length - 1];
+      const loc = await EmployeeLocation.findOneAndUpdate(
+        { employee_id: employeeId },
+        {
+          lat: latest.lat,
+          lng: latest.lng,
+          accuracy: latest.accuracy,
+          updated_at: latest.recorded_at,
+        },
+        { upsert: true, returnDocument: 'after' }
+      ).lean();
+
+      const user = await User.findById(employeeId).lean();
+      const payload = {
+        employee_id: String(user._id),
+        name: user.name,
+        email: user.email,
+        phone: user.phone || '',
+        lat: loc.lat,
+        lng: loc.lng,
+        accuracy: loc.accuracy,
+        is_tracking: loc.is_tracking,
+        updated_at: loc.updated_at,
+      };
+
+      io.to('admins').emit('location:update', payload);
+      return res.json({ synced: valid.length, location: payload });
+    } catch (err) {
+      return res.status(500).json({ error: 'Failed to sync offline locations' });
+    }
+  });
+
   router.post('/stop', authenticate, async (req, res) => {
     try {
       const employeeId = req.user.id;

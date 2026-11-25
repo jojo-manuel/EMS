@@ -87,6 +87,7 @@ const attendanceSchema = new mongoose.Schema(
     punch_out_lat: { type: Number, default: null },
     punch_out_lng: { type: Number, default: null },
     verified_by: { type: String, default: 'fingerprint' },
+    punch_out_reason: { type: String, default: '' },
     status: { type: String, enum: ['punched_in', 'punched_out'], default: 'punched_in' },
   },
   { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } }
