@@ -48,7 +48,7 @@ router.get('/employees', authenticate, requireAdmin, async (req, res) => {
   }
 });
 
-// Admin or Super Admin: create a new employee (Employee ID, Name, Phone, Unit, Area, Email, Password)
+// Admin or Super Admin: create a new employee (Employee ID, Name, Phone, Unit, Area, optional Password)
 router.post('/employees', authenticate, requireAdmin, async (req, res) => {
   const {
     employee_code = '',
@@ -57,12 +57,12 @@ router.post('/employees', authenticate, requireAdmin, async (req, res) => {
     unit = '',
     area = '',
     email = '',
-    password,
+    password = '',
   } = req.body || {};
 
-  if (!employee_code.trim() || !name || !phone.trim() || !unit.trim() || !area.trim() || !password) {
+  if (!employee_code.trim() || !name || !phone.trim() || !unit.trim() || !area.trim()) {
     return res.status(400).json({
-      error: 'Employee ID, Name, Phone Number, Unit, Area, and Password are required',
+      error: 'Employee ID, Name, Phone Number, Unit, and Area are required',
     });
   }
 
@@ -75,9 +75,13 @@ router.post('/employees', authenticate, requireAdmin, async (req, res) => {
       return res.status(409).json({ error: `Employee ID "${cleanCode}" already exists` });
     }
 
+    const finalPassword = password.trim()
+      ? password.trim()
+      : `${cleanCode}@${Math.floor(1000 + Math.random() * 9000)}`;
+
     const finalEmail = email.trim()
       ? email.trim().toLowerCase()
-      : `${cleanCode.toLowerCase().replace(/[^a-z0-9]/g, '')}@emptracker.local`;
+      : `${cleanCode.toLowerCase().replace(/[^a-z0-9]/g, '')}.${Date.now()}@emptracker.local`;
 
     const created = await User.create({
       employee_code: cleanCode,
@@ -86,7 +90,7 @@ router.post('/employees', authenticate, requireAdmin, async (req, res) => {
       phone: phone.trim(),
       unit: unit.trim(),
       area: area.trim(),
-      password_hash: hashPassword(password),
+      password_hash: hashPassword(finalPassword),
       role: 'employee',
     });
 
@@ -101,6 +105,10 @@ router.post('/employees', authenticate, requireAdmin, async (req, res) => {
         area: created.area,
         role: created.role,
         created_at: created.created_at,
+      },
+      credentials: {
+        username: created.employee_code,
+        password: finalPassword,
       },
     });
   } catch (err) {
