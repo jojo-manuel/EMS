@@ -92,8 +92,20 @@ function createTasksRouter(io) {
 
       const populated = await Task.findById(created._id).populate('assigned_to', 'name email').lean();
       const task = formatTask(populated);
+
+      const notifDoc = await Notification.create({
+        type: 'task_assigned',
+        title: `New Work Assigned: ${task.title}`,
+        message: `"${task.title}" was assigned to ${task.assignee_name} for ${new Date(task.scheduled_start).toLocaleString()}.`,
+        task_id: created._id,
+        employee_id: created.assigned_to,
+      });
+
+      const notification = formatNotification(notifDoc);
       io.emit('task:created', task);
-      return res.status(201).json({ task });
+      io.to('admins').emit('notification:new', notification);
+      io.to(`employee:${task.assigned_to}`).emit('notification:assigned', task);
+      return res.status(201).json({ task, notification });
     } catch (err) {
       return res.status(500).json({ error: 'Failed to create task' });
     }

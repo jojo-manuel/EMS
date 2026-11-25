@@ -28,6 +28,8 @@ export default function App() {
   const [lastCoords, setLastCoords] = useState(null);
   const [activePunch, setActivePunch] = useState(null);
   const [punchHistory, setPunchHistory] = useState([]);
+  const [newTaskBanner, setNewTaskBanner] = useState(null);
+  const knownTaskIdsRef = React.useRef(null);
 
   // App-wide Fingerprint Lock state (Initial setup + every app launch)
   const [appUnlocked, setAppUnlocked] = useState(false);
@@ -88,7 +90,20 @@ export default function App() {
     setRefreshing(true);
     try {
       const res = await api.getMyTasks();
-      setTasks(res.tasks);
+      const incoming = res.tasks || [];
+      if (knownTaskIdsRef.current !== null) {
+        const newlyAssigned = incoming.filter((t) => !knownTaskIdsRef.current.has(t.id));
+        if (newlyAssigned.length > 0) {
+          const latest = newlyAssigned[newlyAssigned.length - 1];
+          setNewTaskBanner(latest);
+          Alert.alert(
+            '🔔 New Work Assigned!',
+            `${latest.title}\nScheduled: ${new Date(latest.scheduled_start).toLocaleString()}`
+          );
+        }
+      }
+      knownTaskIdsRef.current = new Set(incoming.map((t) => t.id));
+      setTasks(incoming);
     } catch (err) {
       console.warn('Failed to load tasks:', err.message);
     } finally {
@@ -133,9 +148,16 @@ export default function App() {
       socket.on('task:created', loadTasks);
       socket.on('task:updated', loadTasks);
       socket.on('task:deleted', loadTasks);
+      socket.on('notification:assigned', (task) => {
+        setNewTaskBanner(task);
+        loadTasks();
+      });
     });
 
+    const pollTimer = setInterval(loadTasks, 10000);
+
     return () => {
+      clearInterval(pollTimer);
       if (socket) socket.disconnect();
     };
   }, [token, appUnlocked, loadTasks, loadAttendance]);
@@ -218,6 +240,23 @@ export default function App() {
       </View>
 
       <View style={{ flex: 1 }}>
+        {newTaskBanner && (
+          <TouchableOpacity
+            style={styles.notifBanner}
+            onPress={() => {
+              setNewTaskBanner(null);
+              setTab('schedule');
+            }}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.notifBannerTitle}>🔔 New Task Assigned: {newTaskBanner.title}</Text>
+              <Text style={styles.notifBannerSub}>
+                {new Date(newTaskBanner.scheduled_start).toLocaleString()} · Tap to view in Schedule
+              </Text>
+            </View>
+            <Text style={{ color: '#fff', fontWeight: '800', fontSize: 16 }}>✕</Text>
+          </TouchableOpacity>
+        )}
         {tab === 'schedule' ? (
           <ScheduleScreen tasks={tasks} refreshing={refreshing} onRefresh={loadTasks} />
         ) : (
@@ -320,4 +359,14 @@ const styles = StyleSheet.create({
   tabItemActive: { borderTopWidth: 3, borderTopColor: '#2563eb' },
   tabText: { fontSize: 14, fontWeight: '600', color: '#6b7280' },
   tabTextActive: { color: '#2563eb' },
+  notifBanner: {
+    backgroundColor: '#2563eb',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  notifBannerTitle: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  notifBannerSub: { color: '#dbeafe', fontSize: 11, marginTop: 2 },
 });

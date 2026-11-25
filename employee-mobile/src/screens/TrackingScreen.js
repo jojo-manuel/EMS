@@ -22,22 +22,12 @@ import {
   flushPendingAutoPunchOut,
 } from '../locationTask';
 
-function formatElapsed(startIso) {
-  if (!startIso) return '00:00:00';
-  const diffSec = Math.max(0, Math.floor((Date.now() - new Date(startIso).getTime()) / 1000));
-  const hrs = String(Math.floor(diffSec / 3600)).padStart(2, '0');
-  const mins = String(Math.floor((diffSec % 3600) / 60)).padStart(2, '0');
-  const secs = String(diffSec % 60).padStart(2, '0');
-  return `${hrs}:${mins}:${secs}`;
-}
-
 function isSplitOrOverlayLayout() {
   const win = Dimensions.get('window');
   const scr = Dimensions.get('screen');
   if (!scr.width || !scr.height) return false;
   const widthRatio = win.width / scr.width;
   const heightRatio = win.height / scr.height;
-  // In split-screen, pop-up view, or floating window, window dimensions shrink relative to full screen
   return widthRatio < 0.9 || heightRatio < 0.8 || AppState.currentState !== 'active';
 }
 
@@ -52,7 +42,6 @@ export default function TrackingScreen({
   onRefreshAttendance,
 }) {
   const [busy, setBusy] = useState(false);
-  const [elapsed, setElapsed] = useState('00:00:00');
   const [biometricAvailable, setBiometricAvailable] = useState(true);
   const [isOnline, setIsOnline] = useState(true);
   const [isVpnActive, setIsVpnActive] = useState(false);
@@ -107,20 +96,6 @@ export default function TrackingScreen({
     return () => sub?.remove?.();
   }, []);
 
-  // Shift elapsed timer
-  useEffect(() => {
-    if (!activePunch?.punch_in_at) {
-      setElapsed('00:00:00');
-      return;
-    }
-    setElapsed(formatElapsed(activePunch.punch_in_at));
-    const timer = setInterval(() => {
-      setElapsed(formatElapsed(activePunch.punch_in_at));
-      refreshQueueCount();
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [activePunch, refreshQueueCount]);
-
   // Watchdog: Auto Punch-Out immediately if employee turns off GPS while punched in
   useEffect(() => {
     if (!isTracking) return;
@@ -146,7 +121,6 @@ export default function TrackingScreen({
             await api.punchOut(lat, lng, 'auto_gps_off', reason, new Date().toISOString());
             onRefreshAttendance();
           } catch {
-            // If offline when GPS was turned off, queue auto punch-out for upload when back online
             await queuePendingAutoPunchOut(lat, lng, reason);
           }
 
@@ -195,7 +169,6 @@ export default function TrackingScreen({
     setBusy(true);
     try {
       if (!isTracking) {
-        // 1. Block Punch-In if Split-Screen / Floating Window ("other app layout") is active
         if (isSplitOrOverlayLayout()) {
           Alert.alert(
             'Punch-In Blocked (App Layout)',
@@ -205,7 +178,6 @@ export default function TrackingScreen({
           return;
         }
 
-        // 2. Block Punch-In if VPN is active
         const netState = await NetInfo.fetch();
         if (netState.type === 'vpn') {
           Alert.alert(
@@ -224,7 +196,6 @@ export default function TrackingScreen({
           return;
         }
 
-        // 3. Check GPS is enabled before Punch-In
         const servicesEnabled = await Location.hasServicesEnabledAsync();
         if (!servicesEnabled) {
           Alert.alert(
@@ -240,7 +211,6 @@ export default function TrackingScreen({
           throw new Error('Location permission is required to Punch In and track your shift.');
         }
 
-        // 4. Verify Fingerprint
         const verifiedBy = await verifyFingerprint('Punch In');
         if (!verifiedBy) {
           setBusy(false);
@@ -251,7 +221,6 @@ export default function TrackingScreen({
           accuracy: Location.Accuracy.High,
         });
 
-        // 5. Block Punch-In if Mock / Fake GPS app is active
         if (pos.mocked) {
           Alert.alert(
             'Punch-In Blocked (Mock GPS)',
@@ -261,7 +230,6 @@ export default function TrackingScreen({
           return;
         }
 
-        // 6. Send Punch-In with security checks to backend
         const res = await api.punchIn(
           pos.coords.latitude,
           pos.coords.longitude,
@@ -275,7 +243,6 @@ export default function TrackingScreen({
         );
         setActivePunch(res.record);
 
-        // 7. Start continuous live location tracking (online + offline queue) until Punch Out
         await startLiveTracking((coords) => {
           setLastCoords({
             lat: coords.latitude,
@@ -290,7 +257,6 @@ export default function TrackingScreen({
         onRefreshAttendance();
         Alert.alert('Punched In', 'Fingerprint verified! Live location tracking is now active.');
       } else {
-        // Manual Fingerprint Punch Out
         const verifiedBy = await verifyFingerprint('Punch Out');
         if (!verifiedBy) {
           setBusy(false);
@@ -363,15 +329,15 @@ export default function TrackingScreen({
           </Text>
         </View>
 
-        <Text style={styles.timer}>{elapsed}</Text>
         <Text style={styles.statusSub}>
           {isTracking
             ? `Punched in at ${new Date(activePunch?.punch_in_at || Date.now()).toLocaleTimeString()}. Turning off GPS will automatically punch you out.`
             : 'Scan fingerprint to Punch In (requires full-screen layout, no VPN, and GPS enabled).'}
         </Text>
 
+        {/* Punch In = RED (#ef4444), Punch Out = GREEN (#10b981) */}
         <TouchableOpacity
-          style={[styles.mainBtn, { backgroundColor: isTracking ? '#ef4444' : '#10b981' }]}
+          style={[styles.mainBtn, { backgroundColor: isTracking ? '#10b981' : '#ef4444' }]}
           onPress={handlePunchToggle}
           disabled={busy}
         >
@@ -477,7 +443,6 @@ const styles = StyleSheet.create({
   },
   dot: { width: 10, height: 10, borderRadius: 5 },
   badgeText: { fontSize: 12, fontWeight: '700' },
-  timer: { fontSize: 38, fontWeight: '800', color: '#111827', letterSpacing: 1, marginBottom: 8 },
   statusSub: { fontSize: 13, color: '#6b7280', textAlign: 'center', marginBottom: 20 },
   mainBtn: { width: '100%', paddingVertical: 16, borderRadius: 12, alignItems: 'center' },
   mainBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
