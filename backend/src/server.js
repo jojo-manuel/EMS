@@ -47,6 +47,18 @@ io.on('connection', (socket) => {
 app.use(cors());
 app.use(express.json());
 
+// Ensure MongoDB connection is established before handling any API request (supports Vercel serverless cold starts)
+app.use('/api', async (req, res, next) => {
+  if (req.path === '/health') return next();
+  try {
+    await connectAndSeed();
+    return next();
+  } catch (err) {
+    console.error('MongoDB connection error:', err.message);
+    return res.status(500).json({ error: 'Database connection failed' });
+  }
+});
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', database: 'mongodb', time: new Date().toISOString() });
 });
@@ -60,13 +72,17 @@ app.use('/api/notifications', notificationsRoutes);
 
 const PORT = process.env.PORT || 4000;
 
-connectAndSeed()
-  .then(() => {
-    server.listen(PORT, '0.0.0.0', () => {
-      console.log(`EmpTracker backend running on http://localhost:${PORT}`);
+if (!process.env.VERCEL) {
+  connectAndSeed()
+    .then(() => {
+      server.listen(PORT, '0.0.0.0', () => {
+        console.log(`EmpTracker backend running on http://localhost:${PORT}`);
+      });
+    })
+    .catch((err) => {
+      console.error('Failed to connect to MongoDB:', err.message);
+      process.exit(1);
     });
-  })
-  .catch((err) => {
-    console.error('Failed to connect to MongoDB:', err.message);
-    process.exit(1);
-  });
+}
+
+module.exports = app;

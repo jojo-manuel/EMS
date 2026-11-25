@@ -181,14 +181,30 @@ async function seedDatabase() {
   console.log('Seeded default MongoDB accounts: admin@emptracker.com / admin123, alex@emptracker.com / emp123');
 }
 
+let connectPromise = null;
+
 async function connectAndSeed() {
+  if (mongoose.connection.readyState === 1) {
+    return;
+  }
+  if (connectPromise) {
+    return connectPromise;
+  }
   const uri = process.env.MONGODB_URI;
   if (!uri) {
-    throw new Error('MONGODB_URI is not set in backend/.env');
+    throw new Error('MONGODB_URI is not set in environment variables or backend/.env');
   }
-  await mongoose.connect(uri);
-  console.log('Connected to MongoDB');
-  await seedDatabase();
+  connectPromise = mongoose
+    .connect(uri)
+    .then(async () => {
+      console.log('Connected to MongoDB');
+      await seedDatabase();
+    })
+    .catch((err) => {
+      connectPromise = null;
+      throw err;
+    });
+  return connectPromise;
 }
 
 module.exports = {

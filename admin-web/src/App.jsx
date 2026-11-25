@@ -84,6 +84,12 @@ export default function App() {
     };
   }, [token, loadAll]);
 
+  useEffect(() => {
+    if (!token) return;
+    const interval = setInterval(loadAll, 8000);
+    return () => clearInterval(interval);
+  }, [token, loadAll]);
+
   function handleLogin(newToken, newUser) {
     setAuth(newToken, newUser);
     setToken(newToken);
