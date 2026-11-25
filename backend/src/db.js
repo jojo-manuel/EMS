@@ -18,11 +18,14 @@ function verifyPassword(password, stored) {
 
 const userSchema = new mongoose.Schema(
   {
+    employee_code: { type: String, default: '', trim: true },
     name: { type: String, required: true, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
-    phone: { type: String, default: '' },
+    phone: { type: String, default: '', trim: true },
+    unit: { type: String, default: '', trim: true },
+    area: { type: String, default: '', trim: true },
     password_hash: { type: String, required: true },
-    role: { type: String, enum: ['admin', 'employee'], required: true },
+    role: { type: String, enum: ['superadmin', 'admin', 'employee'], required: true },
   },
   { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } }
 );
@@ -101,18 +104,32 @@ const Notification = mongoose.model('Notification', notificationSchema);
 const Attendance = mongoose.model('Attendance', attendanceSchema);
 
 async function seedDatabase() {
-  const existingAdmin = await User.findOne({ role: 'admin' });
-  if (existingAdmin) return;
+  const [existingSuperAdmin, existingAdmin] = await Promise.all([
+    User.findOne({ role: 'superadmin' }),
+    User.findOne({ role: 'admin' }),
+  ]);
 
-  await User.create({
-    name: 'Admin',
-    email: 'admin@emptracker.com',
-    phone: '',
-    password_hash: hashPassword('admin123'),
-    role: 'admin',
-  });
+  if (!existingSuperAdmin) {
+    await User.create({
+      name: 'Super Admin',
+      email: 'superadmin@emptracker.com',
+      phone: '',
+      password_hash: hashPassword('superadmin123'),
+      role: 'superadmin',
+    });
+    console.log('Initialized default superadmin account: superadmin@emptracker.com');
+  }
 
-  console.log('Initialized default admin account: admin@emptracker.com');
+  if (!existingAdmin) {
+    await User.create({
+      name: 'Admin',
+      email: 'admin@emptracker.com',
+      phone: '',
+      password_hash: hashPassword('admin123'),
+      role: 'admin',
+    });
+    console.log('Initialized default admin account: admin@emptracker.com');
+  }
 }
 
 let connectPromise = null;

@@ -224,7 +224,14 @@ export default function App() {
       <StatusBar style="dark" />
       <View style={styles.header}>
         <View>
-          <Text style={styles.headerTitle}>Hi, {user.name}</Text>
+          <Text style={styles.headerTitle}>
+            Hi, {user.name} {user.employee_code ? `(${user.employee_code})` : ''}
+          </Text>
+          {(user.unit || user.area) ? (
+            <Text style={{ fontSize: 11, color: '#6b7280', marginTop: 1 }}>
+              {[user.unit, user.area].filter(Boolean).join(' · ')}
+            </Text>
+          ) : null}
           <Text style={[styles.headerSub, { color: isTracking ? '#10b981' : '#6b7280' }]}>
             {isTracking ? '● Punched In · Live Tracking' : 'Punched Out'}
           </Text>

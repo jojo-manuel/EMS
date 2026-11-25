@@ -57,6 +57,16 @@ export const api = {
     request(`/api/users/employees/${id}`, {
       method: 'DELETE',
     }),
+  getAdmins: () => request('/api/users/admins'),
+  createAdmin: (payload) =>
+    request('/api/users/admins', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  deleteAdmin: (id) =>
+    request(`/api/users/admins/${id}`, {
+      method: 'DELETE',
+    }),
   getTasks: () => request('/api/tasks'),
   createTask: (payload) =>
     request('/api/tasks', {

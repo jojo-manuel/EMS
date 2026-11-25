@@ -57,14 +57,13 @@ export default function LoginScreen({ onLogin }) {
           placeholder="https://your-project.vercel.app"
         />
 
-        <Text style={styles.label}>Employee Email</Text>
+        <Text style={styles.label}>Employee ID / Email / Phone</Text>
         <TextInput
           style={styles.input}
           value={email}
           onChangeText={setEmail}
           autoCapitalize="none"
-          keyboardType="email-address"
-          placeholder="Enter your work email"
+          placeholder="e.g., EMP-001 or email"
         />
 
         <Text style={styles.label}>Password</Text>

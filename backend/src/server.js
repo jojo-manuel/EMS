@@ -37,7 +37,7 @@ io.use((socket, next) => {
 });
 
 io.on('connection', (socket) => {
-  if (socket.user.role === 'admin') {
+  if (socket.user.role === 'admin' || socket.user.role === 'superadmin') {
     socket.join('admins');
   } else {
     socket.join(`employee:${socket.user.id}`);

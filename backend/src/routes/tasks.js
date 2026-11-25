@@ -43,7 +43,7 @@ function createTasksRouter(io) {
   router.get('/', authenticate, async (req, res) => {
     try {
       const filter = {};
-      if (req.user.role === 'admin') {
+      if (req.user.role === 'admin' || req.user.role === 'superadmin') {
         if (req.query.assigned_to) {
           filter.assigned_to = req.query.assigned_to;
         }

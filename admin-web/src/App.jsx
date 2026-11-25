@@ -5,6 +5,7 @@ import LoginPage from './components/LoginPage';
 import CalendarView from './components/CalendarView';
 import LiveMapView from './components/LiveMapView';
 import EmployeesView from './components/EmployeesView';
+import AdminsView from './components/AdminsView';
 import AttendanceView from './components/AttendanceView';
 import NotificationsPanel from './components/NotificationsPanel';
 
@@ -15,6 +16,7 @@ export default function App() {
 
   const [tasks, setTasks] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [admins, setAdmins] = useState([]);
   const [locations, setLocations] = useState([]);
   const [attendance, setAttendance] = useState([]);
   const [notifications, setNotifications] = useState([]);
@@ -23,18 +25,25 @@ export default function App() {
   const loadAll = useCallback(async () => {
     if (!token) return;
     try {
-      const [tRes, eRes, lRes, aRes, nRes] = await Promise.all([
+      const promises = [
         api.getTasks(),
         api.getEmployees(),
         api.getLocations(),
         api.getAttendance(),
         api.getNotifications(),
-      ]);
+      ];
+      if (user?.role === 'superadmin') {
+        promises.push(api.getAdmins());
+      }
+      const [tRes, eRes, lRes, aRes, nRes, admRes] = await Promise.all(promises);
       setTasks(tRes.tasks);
       setEmployees(eRes.employees);
       setLocations(lRes.locations);
       setAttendance(aRes.records);
       setNotifications(nRes.notifications);
+      if (admRes) {
+        setAdmins(admRes.admins);
+      }
     } catch (err) {
       if (String(err.message).includes('Invalid') || String(err.message).includes('Authentication')) {
         clearAuth();
@@ -42,7 +51,7 @@ export default function App() {
         setUser(null);
       }
     }
-  }, [token]);
+  }, [token, user?.role]);
 
   useEffect(() => {
     if (!token) return;
@@ -111,6 +120,7 @@ export default function App() {
     map: 'Live Employee Tracking Map',
     attendance: 'Fingerprint Attendance & Punches',
     employees: 'Employees Directory',
+    admins: 'Manage Admins (Super Admin)',
   };
 
   return (
@@ -131,8 +141,18 @@ export default function App() {
         <button className={`nav-btn ${tab === 'employees' ? 'active' : ''}`} onClick={() => setTab('employees')}>
           👥 Employees
         </button>
+        {user.role === 'superadmin' && (
+          <button className={`nav-btn ${tab === 'admins' ? 'active' : ''}`} onClick={() => setTab('admins')}>
+            🛡️ Manage Admins
+          </button>
+        )}
 
         <div className="sidebar-footer">
+          <div style={{ marginBottom: 6 }}>
+            <span className={`badge ${user.role === 'superadmin' ? 'badge-rescheduled' : 'badge-pending'}`}>
+              {user.role === 'superadmin' ? '🛡️ SUPER ADMIN' : 'ADMIN'}
+            </span>
+          </div>
           <div style={{ color: '#fff', fontWeight: 600 }}>{user.name}</div>
           <div style={{ marginBottom: 10 }}>{user.email}</div>
           <button className="btn btn-secondary" style={{ width: '100%' }} onClick={handleLogout}>
@@ -154,6 +174,9 @@ export default function App() {
           {tab === 'map' && <LiveMapView locations={locations} />}
           {tab === 'attendance' && <AttendanceView records={attendance} />}
           {tab === 'employees' && <EmployeesView employees={employees} onRefresh={loadAll} />}
+          {tab === 'admins' && user.role === 'superadmin' && (
+            <AdminsView admins={admins} currentUser={user} onRefresh={loadAll} />
+          )}
         </main>
       </div>
 

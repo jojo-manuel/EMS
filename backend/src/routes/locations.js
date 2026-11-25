@@ -18,9 +18,12 @@ function createLocationsRouter(io) {
         const loc = locMap.get(String(u._id));
         return {
           employee_id: String(u._id),
+          employee_code: u.employee_code || '',
           name: u.name,
           email: u.email,
           phone: u.phone || '',
+          unit: u.unit || '',
+          area: u.area || '',
           lat: loc ? loc.lat : null,
           lng: loc ? loc.lng : null,
           accuracy: loc ? loc.accuracy : null,

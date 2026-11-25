@@ -13,8 +13,8 @@ export default function LoginPage({ onLogin }) {
     setLoading(true);
     try {
       const data = await api.login(email, password);
-      if (data.user.role !== 'admin') {
-        throw new Error('This dashboard is for Admin accounts. Employees should use the mobile app.');
+      if (data.user.role !== 'admin' && data.user.role !== 'superadmin') {
+        throw new Error('This dashboard is for Admin and Super Admin accounts. Employees should use the mobile app.');
       }
       onLogin(data.token, data.user);
     } catch (err) {
