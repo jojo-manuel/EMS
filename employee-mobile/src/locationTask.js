@@ -120,7 +120,7 @@ export async function startLiveTracking(onLocationUpdate) {
   }
 
   const initial = await Location.getCurrentPositionAsync({
-    accuracy: Location.Accuracy.Balanced,
+    accuracy: Location.Accuracy.High,
   });
   await recordOrSyncLocation(
     initial.coords.latitude,
@@ -134,9 +134,9 @@ export async function startLiveTracking(onLocationUpdate) {
   }
   foregroundSubscription = await Location.watchPositionAsync(
     {
-      accuracy: Location.Accuracy.Balanced,
-      timeInterval: 15000,
-      distanceInterval: 20,
+      accuracy: Location.Accuracy.High,
+      timeInterval: 5000,
+      distanceInterval: 5,
     },
     async (loc) => {
       await recordOrSyncLocation(
@@ -155,12 +155,12 @@ export async function startLiveTracking(onLocationUpdate) {
     );
     if (!alreadyStarted) {
       await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
-        accuracy: Location.Accuracy.Balanced,
-        timeInterval: 15000,
-        distanceInterval: 20,
+        accuracy: Location.Accuracy.High,
+        timeInterval: 5000,
+        distanceInterval: 5,
         foregroundService: {
           notificationTitle: 'EmpTracker Live Shift Active',
-          notificationBody: 'Tracking location (works offline & syncs when online).',
+          notificationBody: 'Tracking full movement path (works offline & syncs when online).',
         },
       });
     }

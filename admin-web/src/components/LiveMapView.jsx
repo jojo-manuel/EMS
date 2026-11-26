@@ -49,17 +49,26 @@ function todayStr() {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+function formatDistanceLabel(km = 0, meters = null) {
+  const m = meters != null ? meters : Math.round((km || 0) * 1000);
+  if (m < 1000) {
+    return `${Number(km || 0).toFixed(3)} km (${m} m)`;
+  }
+  return `${Number(km || 0).toFixed(2)} km (${m.toLocaleString()} m)`;
+}
+
 export default function LiveMapView({ locations, tasks = [], currentUser }) {
   const mapElRef = useRef(null);
   const mapRef = useRef(null);
   const markersRef = useRef({});
   const routeLayerRef = useRef(null);
+  const fittedEmpIdRef = useRef(null);
 
   const lockedUnit =
     currentUser?.role === 'admin' && currentUser?.unit ? currentUser.unit.toUpperCase() : '';
 
   const [unitFilter, setUnitFilter] = useState('ALL');
-  const [selectedEmp, setSelectedEmp] = useState(null);
+  const [selectedEmpId, setSelectedEmpId] = useState(null);
   const [historyDate, setHistoryDate] = useState(todayStr());
   const [historyData, setHistoryData] = useState(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -70,11 +79,16 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
     return locations.filter((l) => (l.unit || '').toUpperCase() === unitFilter);
   }, [locations, lockedUnit, unitFilter]);
 
+  const selectedEmp = useMemo(
+    () => locations.find((l) => String(l.employee_id) === String(selectedEmpId)) || null,
+    [locations, selectedEmpId]
+  );
+
   useEffect(() => {
     if (!mapElRef.current || mapRef.current) return;
 
     const firstValid = locations.find((l) => l.lat != null && l.lng != null);
-    const center = firstValid ? [firstValid.lat, firstValid.lng] : [10.8505, 76.2711]; // Kerala default center
+    const center = firstValid ? [firstValid.lat, firstValid.lng] : [10.8505, 76.2711];
 
     const map = L.map(mapElRef.current).setView(center, 8);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -99,7 +113,6 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
 
     const visibleIds = new Set(filteredLocations.map((l) => String(l.employee_id)));
 
-    // Remove hidden markers when unit filter changes
     Object.keys(markersRef.current).forEach((id) => {
       if (!visibleIds.has(String(id))) {
         markersRef.current[id].remove();
@@ -110,11 +123,12 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
     filteredLocations.forEach((loc) => {
       if (loc.lat == null || loc.lng == null) return;
       const key = loc.employee_id;
+      const distLabel = formatDistanceLabel(loc.today_distance_km, loc.today_distance_meters);
       const popupHtml = `
         <strong>${loc.name}</strong> ${loc.employee_code ? `(${loc.employee_code})` : ''}<br/>
         Unit: <strong>${loc.unit || '—'}</strong> · Area: ${loc.area || '—'}<br/>
         Status: <strong>${loc.is_tracking ? 'Live Tracking' : 'Offline'}</strong><br/>
-        Today's Distance: <strong>${loc.today_distance_km ?? 0} km</strong><br/>
+        Full Path Distance Today: <strong>${distLabel}</strong> (${loc.today_points_count ?? 0} waypoints)<br/>
         Coords: ${Number(loc.lat).toFixed(5)}, ${Number(loc.lng).toFixed(5)}<br/>
         Updated: ${loc.updated_at ? new Date(loc.updated_at).toLocaleTimeString() : 'N/A'}
       `;
@@ -134,18 +148,19 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
     });
   }, [filteredLocations]);
 
-  // Load movement history & task completion/reschedule markers when employee or date changes
+  // Fetch & auto-refresh full movement path whenever selected employee, date, or live location updates
   useEffect(() => {
-    if (!selectedEmp) {
+    if (!selectedEmpId) {
       setHistoryData(null);
+      fittedEmpIdRef.current = null;
       if (routeLayerRef.current) routeLayerRef.current.clearLayers();
       return;
     }
 
     let cancelled = false;
-    setLoadingHistory(true);
+    setLoadingHistory((prev) => (!historyData ? true : prev));
     api
-      .getLocationHistory(selectedEmp.employee_id, historyDate)
+      .getLocationHistory(selectedEmpId, historyDate)
       .then((res) => {
         if (cancelled) return;
         setHistoryData(res);
@@ -160,9 +175,9 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
     return () => {
       cancelled = true;
     };
-  }, [selectedEmp, historyDate]);
+  }, [selectedEmpId, historyDate, selectedEmp?.updated_at, selectedEmp?.today_points_count]);
 
-  // Draw route polyline + task completion/reschedule markers on map
+  // Draw full multi-segment path polyline + all intermediate path waypoints + task action markers
   useEffect(() => {
     const map = mapRef.current;
     const layer = routeLayerRef.current;
@@ -174,28 +189,72 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
       const pts = historyData.points || [];
       if (pts.length >= 2) {
         const latLngs = pts.map((p) => [p.lat, p.lng]);
+
+        // Outer halo for high visibility of the full tracked path
+        L.polyline(latLngs, {
+          color: '#ffffff',
+          weight: 8,
+          opacity: 0.9,
+        }).addTo(layer);
+
+        // Main continuous path polyline connecting every recorded waypoint in order
         const polyline = L.polyline(latLngs, {
           color: '#2563eb',
           weight: 4,
-          opacity: 0.85,
+          opacity: 0.95,
         }).addTo(layer);
 
-        // Start marker
-        const first = pts[0];
-        L.circleMarker([first.lat, first.lng], {
+        // Draw every waypoint along the path so the entire tracked path is inspectable
+        pts.forEach((pt, idx) => {
+          const isFirst = idx === 0;
+          const isLast = idx === pts.length - 1;
+          const radius = isFirst || isLast ? 7 : 4;
+          const fillColor = isFirst ? '#10b981' : isLast ? '#ef4444' : '#3b82f6';
+          const borderColor = isFirst ? '#065f46' : isLast ? '#991b1b' : '#1d4ed8';
+          const title = isFirst
+            ? `🟢 Path Start (Point #1 of ${pts.length})`
+            : isLast
+            ? `🔴 Latest Path Point (Point #${idx + 1} of ${pts.length})`
+            : `🔵 Path Waypoint #${idx + 1} of ${pts.length}`;
+
+          L.circleMarker([pt.lat, pt.lng], {
+            radius,
+            color: borderColor,
+            weight: 2,
+            fillColor,
+            fillOpacity: 1,
+          })
+            .addTo(layer)
+            .bindPopup(
+              `<strong>${title}</strong><br/>
+               Employee: ${selectedEmp?.name || ''}<br/>
+               Segment Step: <strong>+${pt.segment_meters ?? 0} m</strong><br/>
+               Cumulative Path Distance: <strong>${pt.cumulative_km ?? 0} km</strong><br/>
+               Coords: ${Number(pt.lat).toFixed(6)}, ${Number(pt.lng).toFixed(6)}<br/>
+               Time: ${pt.recorded_at ? new Date(pt.recorded_at).toLocaleString() : ''}`
+            );
+        });
+
+        const fitKey = `${selectedEmpId}:${historyDate}`;
+        if (fittedEmpIdRef.current !== fitKey) {
+          fittedEmpIdRef.current = fitKey;
+          map.fitBounds(polyline.getBounds(), { padding: [45, 45], maxZoom: 16 });
+        }
+      } else if (pts.length === 1) {
+        const pt = pts[0];
+        L.circleMarker([pt.lat, pt.lng], {
           radius: 7,
-          color: '#1e40af',
-          fillColor: '#60a5fa',
+          color: '#065f46',
+          fillColor: '#10b981',
           fillOpacity: 1,
         })
           .addTo(layer)
           .bindPopup(
-            `<strong>Route Start (${selectedEmp?.name})</strong><br/>Time: ${new Date(first.recorded_at).toLocaleString()}`
+            `<strong>🟢 First Recorded Point (#1)</strong><br/>
+             Move at least 5 meters while punched in to add segments to the path.<br/>
+             Coords: ${Number(pt.lat).toFixed(6)}, ${Number(pt.lng).toFixed(6)}`
           );
-
-        map.fitBounds(polyline.getBounds(), { padding: [40, 40], maxZoom: 16 });
-      } else if (pts.length === 1) {
-        map.flyTo([pts[0].lat, pts[0].lng], 15, { duration: 0.7 });
+        map.flyTo([pt.lat, pt.lng], 15, { duration: 0.7 });
       }
 
       // Plot task completion & reschedule markers for selected employee
@@ -213,7 +272,6 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
           );
       });
     } else {
-      // When no single employee is selected, show all tasks' completion/reschedule location markers
       tasks.forEach((t) => {
         if (typeof t.completed_lat === 'number' && typeof t.completed_lng === 'number') {
           L.marker([t.completed_lat, t.completed_lng], { icon: makeTaskActionIcon('completed') })
@@ -239,12 +297,12 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
         }
       });
     }
-  }, [historyData, selectedEmp, tasks]);
+  }, [historyData, selectedEmp, selectedEmpId, historyDate, tasks]);
 
   const selectEmployee = (loc) => {
-    setSelectedEmp(loc);
+    setSelectedEmpId(loc.employee_id);
     if (mapRef.current && loc.lat != null && loc.lng != null) {
-      mapRef.current.flyTo([loc.lat, loc.lng], 14, { duration: 0.7 });
+      mapRef.current.flyTo([loc.lat, loc.lng], 15, { duration: 0.7 });
       const marker = markersRef.current[loc.employee_id];
       if (marker) marker.openPopup();
     }
@@ -284,7 +342,7 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
             fontSize: 12,
           }}
         >
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>Movement History Date</div>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>Movement Path Date</div>
           <div style={{ display: 'flex', gap: 6 }}>
             <input
               type="date"
@@ -302,12 +360,12 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
             </button>
           </div>
           <div style={{ marginTop: 6, color: '#6b7280', fontSize: 11 }}>
-            Click an employee below to view their movement trail, distance covered, & task pins.
+            Click an employee below to view their full multi-point path & total distance covered.
           </div>
         </div>
 
         {filteredLocations.map((loc) => {
-          const isSelected = selectedEmp?.employee_id === loc.employee_id;
+          const isSelected = String(selectedEmpId) === String(loc.employee_id);
           return (
             <div
               key={loc.employee_id}
@@ -326,8 +384,8 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
               <div style={{ fontSize: 12, color: '#374151', marginTop: 4, fontWeight: 600 }}>
                 {loc.unit || 'No Unit'} {loc.area ? `· ${loc.area}` : ''}
               </div>
-              <div style={{ fontSize: 12, color: '#2563eb', marginTop: 4, fontWeight: 600 }}>
-                🛣️ Today: {loc.today_distance_km ?? 0} km ({loc.today_points_count ?? 0} pts)
+              <div style={{ fontSize: 12, color: '#2563eb', marginTop: 4, fontWeight: 700 }}>
+                🛣️ Path Distance: {formatDistanceLabel(loc.today_distance_km, loc.today_distance_meters)} ({loc.today_points_count ?? 0} pts)
               </div>
               <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
                 {loc.lat != null
@@ -361,16 +419,15 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
               <strong>
                 {selectedEmp.name} ({selectedEmp.unit || '—'})
               </strong>{' '}
-              — Movement History ({historyDate === 'all' ? 'All Time' : historyDate}):{' '}
-              {loadingHistory ? (
-                <span>Loading trail...</span>
+              — Full Tracked Path ({historyDate === 'all' ? 'All Time' : historyDate}):{' '}
+              {loadingHistory && !historyData ? (
+                <span>Loading path...</span>
               ) : (
                 <>
                   <strong style={{ color: '#1d4ed8' }}>
-                    {historyData?.distance_km ?? 0} km covered
+                    {formatDistanceLabel(historyData?.distance_km, historyData?.distance_meters)} covered
                   </strong>{' '}
-                  ({historyData?.points?.length ?? 0} GPS points ·{' '}
-                  {historyData?.task_markers?.length ?? 0} task completion/reschedule markers)
+                  across <strong>{historyData?.points?.length ?? 0}</strong> path waypoints (every segment summed in order)
                 </>
               )}
             </div>
@@ -378,9 +435,9 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
               type="button"
               className="btn btn-secondary"
               style={{ padding: '5px 10px', fontSize: 12 }}
-              onClick={() => setSelectedEmp(null)}
+              onClick={() => setSelectedEmpId(null)}
             >
-              Clear Route Trail
+              Clear Path
             </button>
           </div>
         )}
@@ -388,14 +445,16 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
         <div
           style={{
             display: 'flex',
+            flexWrap: 'wrap',
             gap: 14,
             fontSize: 12,
             color: '#4b5563',
             padding: '0 4px',
           }}
         >
-          <span>🟢 <strong>Live Employee Pin</strong></span>
-          <span>🔵 <strong>Movement Route Line</strong></span>
+          <span>🟢 <strong>Path Start (#1)</strong></span>
+          <span>🔵 <strong>Tracked Waypoints & Route Line</strong></span>
+          <span>🔴 <strong>Latest Path Point</strong></span>
           <span>✅ <strong>Task Completed Location</strong></span>
           <span>🟠 <strong>Task Rescheduled Location</strong></span>
         </div>
