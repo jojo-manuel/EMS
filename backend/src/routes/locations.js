@@ -26,8 +26,7 @@ function buildTrackedPathWithDistance(points) {
     if (idx > 0) {
       const prev = points[idx - 1];
       const dist = haversineKm(prev.lat, prev.lng, p.lat, p.lng);
-      // Filter only stationary sub-1-meter float noise; sum all real path steps
-      if (dist >= 0.001) {
+      if (dist >= 0.0005) {
         segmentKm = dist;
         cumulativeKm += dist;
       }
@@ -52,7 +51,6 @@ function buildTrackedPathWithDistance(points) {
 }
 
 function getStartOfTodayWindow() {
-  // Use last 24h / local day start so UTC vs IST timezone never hides today's path
   const now = new Date();
   const istOffsetMs = 5.5 * 60 * 60 * 1000;
   const istNow = new Date(now.getTime() + istOffsetMs);
@@ -60,7 +58,7 @@ function getStartOfTodayWindow() {
   return new Date(istNow.getTime() - istOffsetMs);
 }
 
-async function computeTodayStatsForEmployee(employeeId) {
+async function computeTodayStatsForEmployee(employeeId, currentLoc = null) {
   const startOfDay = getStartOfTodayWindow();
   const pts = await LocationHistory.find({
     employee_id: employeeId,
@@ -68,18 +66,34 @@ async function computeTodayStatsForEmployee(employeeId) {
   })
     .sort({ recorded_at: 1 })
     .lean();
-  const { totalKm, totalMeters } = buildTrackedPathWithDistance(pts);
+
+  const fullPts = [...pts];
+  if (currentLoc && typeof currentLoc.lat === 'number' && typeof currentLoc.lng === 'number') {
+    const last = fullPts[fullPts.length - 1];
+    if (!last || last.lat !== currentLoc.lat || last.lng !== currentLoc.lng) {
+      fullPts.push({
+        _id: 'live-tip',
+        lat: currentLoc.lat,
+        lng: currentLoc.lng,
+        accuracy: currentLoc.accuracy || 0,
+        recorded_at: currentLoc.updated_at || new Date(),
+      });
+    }
+  }
+
+  const { totalKm, totalMeters, annotatedPoints } = buildTrackedPathWithDistance(fullPts);
   return {
     today_distance_km: totalKm,
     today_distance_meters: totalMeters,
-    today_points_count: pts.length,
+    today_points_count: annotatedPoints.length,
+    today_path: annotatedPoints,
   };
 }
 
 function createLocationsRouter(io) {
   const router = express.Router();
 
-  // Admin (unit-scoped) or Super Admin (all units): get latest live locations + today's full-path distance
+  // Admin (unit-scoped) or Super Admin (all units): get latest live locations + full connected path for today
   router.get('/', authenticate, requireAdmin, async (req, res) => {
     try {
       const scope = await getAdminUnitScope(req.user);
@@ -115,8 +129,20 @@ function createLocationsRouter(io) {
       const rows = employees.map((u) => {
         const key = String(u._id);
         const loc = locMap.get(key);
-        const pts = histByEmp.get(key) || [];
-        const { totalKm, totalMeters } = buildTrackedPathWithDistance(pts);
+        const pts = [...(histByEmp.get(key) || [])];
+        if (loc && typeof loc.lat === 'number' && typeof loc.lng === 'number') {
+          const last = pts[pts.length - 1];
+          if (!last || last.lat !== loc.lat || last.lng !== loc.lng) {
+            pts.push({
+              _id: 'live-tip',
+              lat: loc.lat,
+              lng: loc.lng,
+              accuracy: loc.accuracy || 0,
+              recorded_at: loc.updated_at || new Date(),
+            });
+          }
+        }
+        const { totalKm, totalMeters, annotatedPoints } = buildTrackedPathWithDistance(pts);
         return {
           employee_id: key,
           employee_code: u.employee_code || '',
@@ -132,7 +158,8 @@ function createLocationsRouter(io) {
           updated_at: loc ? loc.updated_at : null,
           today_distance_km: totalKm,
           today_distance_meters: totalMeters,
-          today_points_count: pts.length,
+          today_points_count: annotatedPoints.length,
+          today_path: annotatedPoints,
         };
       });
 
@@ -142,7 +169,7 @@ function createLocationsRouter(io) {
     }
   });
 
-  // Get full movement history polyline, cumulative path distance, and task completion/reschedule markers
+  // Get full movement history polyline, cumulative path distance, and task completion/reschedule/cancel markers
   router.get('/:employeeId/history', authenticate, requireAdmin, async (req, res) => {
     try {
       const { employeeId } = req.params;
@@ -154,7 +181,6 @@ function createLocationsRouter(io) {
       const { date } = req.query;
       const histFilter = { employee_id: employeeId };
       if (date && date !== 'all') {
-        // Parse YYYY-MM-DD in IST (+05:30) so all points recorded on that calendar day are included
         const dayStart = new Date(`${date}T00:00:00.000+05:30`);
         const dayEnd = new Date(`${date}T23:59:59.999+05:30`);
         if (!isNaN(dayStart.getTime())) {
@@ -177,12 +203,15 @@ function createLocationsRouter(io) {
           .lean(),
       ]);
 
-      // Ensure the latest live position is also at the tip of the path if it was recorded today
       const fullPathPoints = [...points];
       if (currentLoc && typeof currentLoc.lat === 'number' && typeof currentLoc.lng === 'number') {
         const lastPt = fullPathPoints[fullPathPoints.length - 1];
         if (!lastPt || lastPt.lat !== currentLoc.lat || lastPt.lng !== currentLoc.lng) {
-          if (!date || date === 'all' || new Date(currentLoc.updated_at) >= new Date(`${date}T00:00:00.000+05:30`)) {
+          if (
+            !date ||
+            date === 'all' ||
+            new Date(currentLoc.updated_at) >= new Date(`${date}T00:00:00.000+05:30`)
+          ) {
             fullPathPoints.push({
               _id: 'live-tip',
               lat: currentLoc.lat,
@@ -280,7 +309,7 @@ function createLocationsRouter(io) {
 
       const [user, todayStats] = await Promise.all([
         User.findById(employeeId).lean(),
-        computeTodayStatsForEmployee(employeeId),
+        computeTodayStatsForEmployee(employeeId, loc),
       ]);
 
       const payload = {
@@ -346,7 +375,7 @@ function createLocationsRouter(io) {
 
       const [user, todayStats] = await Promise.all([
         User.findById(employeeId).lean(),
-        computeTodayStatsForEmployee(employeeId),
+        computeTodayStatsForEmployee(employeeId, loc),
       ]);
 
       const payload = {
@@ -383,7 +412,7 @@ function createLocationsRouter(io) {
 
       const [user, todayStats] = await Promise.all([
         User.findById(employeeId).lean(),
-        computeTodayStatsForEmployee(employeeId),
+        computeTodayStatsForEmployee(employeeId, loc),
       ]);
 
       const payload = {

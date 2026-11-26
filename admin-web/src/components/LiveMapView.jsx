@@ -17,6 +17,50 @@ function makeMarkerIcon(isTracking, initials) {
   });
 }
 
+function makeWaypointBadgeIcon(number, isFirst, isLast) {
+  const bg = isFirst ? '#10b981' : isLast ? '#ef4444' : '#2563eb';
+  const size = isFirst || isLast ? 24 : 20;
+  return L.divIcon({
+    className: 'custom-waypoint-marker',
+    html: `<div style="
+      width: ${size}px; height: ${size}px; border-radius: 50%;
+      background: ${bg}; color: #fff; font-weight: 800; font-size: 10px;
+      display: flex; align-items: center; justify-content: center;
+      border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+    ">${number}</div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+}
+
+function makeDirectionArrowIcon(angleDeg) {
+  return L.divIcon({
+    className: 'custom-dir-arrow',
+    html: `<div style="
+      transform: rotate(${angleDeg}deg);
+      color: #1d4ed8;
+      font-size: 14px;
+      font-weight: 900;
+      text-shadow: 0 0 3px #fff, 0 0 3px #fff;
+      line-height: 16px;
+      text-align: center;
+    ">▲</div>`,
+    iconSize: [16, 16],
+    iconAnchor: [8, 8],
+  });
+}
+
+function bearingDegrees(lat1, lng1, lat2, lng2) {
+  const toRad = (d) => (d * Math.PI) / 180;
+  const toDeg = (r) => (r * 180) / Math.PI;
+  const dLon = toRad(lng2 - lng1);
+  const y = Math.sin(dLon) * Math.cos(toRad(lat2));
+  const x =
+    Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+    Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
 function makeTaskActionIcon(type) {
   const isComplete = type === 'completed';
   const isCancelled = type === 'cancelled';
@@ -58,20 +102,68 @@ function formatDistanceLabel(km = 0, meters = null) {
   return `${Number(km || 0).toFixed(2)} km (${m.toLocaleString()} m)`;
 }
 
+// Fetch road-snapped route geometry connecting the employee's ordered waypoints via OSRM
+async function fetchRoadSnappedGeometry(points) {
+  if (!points || points.length < 2) return null;
+
+  // Deduplicate identical consecutive points and sample up to 80 waypoints for OSRM URL limit
+  const distinct = [points[0]];
+  for (let i = 1; i < points.length; i++) {
+    const prev = distinct[distinct.length - 1];
+    const curr = points[i];
+    if (Math.abs(prev.lat - curr.lat) > 0.00003 || Math.abs(prev.lng - curr.lng) > 0.00003) {
+      distinct.push(curr);
+    }
+  }
+  if (distinct.length < 2) return null;
+
+  let sampled = distinct;
+  if (distinct.length > 80) {
+    const step = (distinct.length - 1) / 79;
+    sampled = [];
+    for (let i = 0; i < 79; i++) {
+      sampled.push(distinct[Math.round(i * step)]);
+    }
+    sampled.push(distinct[distinct.length - 1]);
+  }
+
+  const coordsStr = sampled.map((p) => `${p.lng},${p.lat}`).join(';');
+  const url = `https://router.project-osrm.org/route/v1/driving/${coordsStr}?overview=full&geometries=geojson`;
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const route = data?.routes?.[0];
+    if (!route?.geometry?.coordinates) return null;
+    return {
+      latLngs: route.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
+      roadDistanceMeters: Math.round(route.distance || 0),
+      roadDistanceKm: Number(((route.distance || 0) / 1000).toFixed(3)),
+    };
+  } catch {
+    return null;
+  }
+}
+
+const ROUTE_COLORS = ['#2563eb', '#7c3aed', '#0891b2', '#db2777', '#ea580c', '#059669'];
+
 export default function LiveMapView({ locations, tasks = [], currentUser }) {
   const mapElRef = useRef(null);
   const mapRef = useRef(null);
   const markersRef = useRef({});
   const routeLayerRef = useRef(null);
-  const fittedEmpIdRef = useRef(null);
+  const fittedKeyRef = useRef(null);
 
   const lockedUnit =
     currentUser?.role === 'admin' && currentUser?.unit ? currentUser.unit.toUpperCase() : '';
 
   const [unitFilter, setUnitFilter] = useState('ALL');
   const [selectedEmpId, setSelectedEmpId] = useState(null);
-  const [historyDate, setHistoryDate] = useState(todayStr());
+  const [historyDate, setHistoryDate] = useState('all'); // Default to 'all' so every recorded point is connected immediately
+  const [routeMode, setRouteMode] = useState('both'); // 'both' (Road + Direct Points) | 'direct' (Connect Exact Points)
   const [historyData, setHistoryData] = useState(null);
+  const [roadRoute, setRoadRoute] = useState(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
   const filteredLocations = useMemo(() => {
@@ -85,13 +177,24 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
     [locations, selectedEmpId]
   );
 
+  // Auto-select the first employee with a tracked path so their full connected route is visible immediately
+  useEffect(() => {
+    if (selectedEmpId) return;
+    const withPath =
+      filteredLocations.find((l) => (l.today_points_count || 0) >= 2 || l.is_tracking) ||
+      filteredLocations.find((l) => l.lat != null && l.lng != null);
+    if (withPath) {
+      setSelectedEmpId(withPath.employee_id);
+    }
+  }, [filteredLocations, selectedEmpId]);
+
   useEffect(() => {
     if (!mapElRef.current || mapRef.current) return;
 
     const firstValid = locations.find((l) => l.lat != null && l.lng != null);
     const center = firstValid ? [firstValid.lat, firstValid.lng] : [10.8505, 76.2711];
 
-    const map = L.map(mapElRef.current).setView(center, 8);
+    const map = L.map(mapElRef.current).setView(center, 10);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors',
     }).addTo(map);
@@ -129,7 +232,7 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
         <strong>${loc.name}</strong> ${loc.employee_code ? `(${loc.employee_code})` : ''}<br/>
         Unit: <strong>${loc.unit || '—'}</strong> · Area: ${loc.area || '—'}<br/>
         Status: <strong>${loc.is_tracking ? 'Live Tracking' : 'Offline'}</strong><br/>
-        Full Path Distance Today: <strong>${distLabel}</strong> (${loc.today_points_count ?? 0} waypoints)<br/>
+        Connected Path Today: <strong>${distLabel}</strong> (${loc.today_points_count ?? 0} points)<br/>
         Coords: ${Number(loc.lat).toFixed(5)}, ${Number(loc.lng).toFixed(5)}<br/>
         Updated: ${loc.updated_at ? new Date(loc.updated_at).toLocaleTimeString() : 'N/A'}
       `;
@@ -153,8 +256,8 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
   useEffect(() => {
     if (!selectedEmpId) {
       setHistoryData(null);
-      fittedEmpIdRef.current = null;
-      if (routeLayerRef.current) routeLayerRef.current.clearLayers();
+      setRoadRoute(null);
+      fittedKeyRef.current = null;
       return;
     }
 
@@ -162,12 +265,21 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
     setLoadingHistory((prev) => (!historyData ? true : prev));
     api
       .getLocationHistory(selectedEmpId, historyDate)
-      .then((res) => {
+      .then(async (res) => {
         if (cancelled) return;
         setHistoryData(res);
+        if (res.points && res.points.length >= 2) {
+          const snapped = await fetchRoadSnappedGeometry(res.points);
+          if (!cancelled) setRoadRoute(snapped);
+        } else {
+          setRoadRoute(null);
+        }
       })
       .catch(() => {
-        if (!cancelled) setHistoryData(null);
+        if (!cancelled) {
+          setHistoryData(null);
+          setRoadRoute(null);
+        }
       })
       .finally(() => {
         if (!cancelled) setLoadingHistory(false);
@@ -178,7 +290,7 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
     };
   }, [selectedEmpId, historyDate, selectedEmp?.updated_at, selectedEmp?.today_points_count]);
 
-  // Draw full multi-segment path polyline + all intermediate path waypoints + task action markers
+  // Draw connected route connecting all points + numbered waypoints + direction arrows
   useEffect(() => {
     const map = mapRef.current;
     const layer = routeLayerRef.current;
@@ -186,73 +298,101 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
 
     layer.clearLayers();
 
-    if (historyData) {
+    if (selectedEmpId && historyData) {
       const pts = historyData.points || [];
       if (pts.length >= 2) {
-        const latLngs = pts.map((p) => [p.lat, p.lng]);
+        const directLatLngs = pts.map((p) => [p.lat, p.lng]);
 
-        // Outer halo for high visibility of the full tracked path
-        L.polyline(latLngs, {
+        // 1. If road-snapped route is enabled & available, draw the road-following path
+        if (routeMode === 'both' && roadRoute?.latLngs?.length >= 2) {
+          L.polyline(roadRoute.latLngs, {
+            color: '#ffffff',
+            weight: 9,
+            opacity: 0.9,
+          }).addTo(layer);
+
+          L.polyline(roadRoute.latLngs, {
+            color: '#10b981',
+            weight: 5,
+            opacity: 0.9,
+          })
+            .addTo(layer)
+            .bindPopup(
+              `<strong>🛣️ Exact Road Route (${selectedEmp?.name})</strong><br/>Road Distance: ${formatDistanceLabel(
+                roadRoute.roadDistanceKm,
+                roadRoute.roadDistanceMeters
+              )}`
+            );
+        }
+
+        // 2. Always connect all recorded GPS points in exact sequential order (#1 -> #2 -> ... -> #N)
+        L.polyline(directLatLngs, {
           color: '#ffffff',
-          weight: 8,
-          opacity: 0.9,
+          weight: routeMode === 'direct' ? 8 : 5,
+          opacity: 0.85,
         }).addTo(layer);
 
-        // Main continuous path polyline connecting every recorded waypoint in order
-        const polyline = L.polyline(latLngs, {
+        const directLine = L.polyline(directLatLngs, {
           color: '#2563eb',
-          weight: 4,
+          weight: routeMode === 'direct' ? 4 : 3,
           opacity: 0.95,
+          dashArray: routeMode === 'both' && roadRoute ? '6, 6' : null,
         }).addTo(layer);
 
-        // Draw every waypoint along the path so the entire tracked path is inspectable
+        // 3. Draw directional arrows along each connected segment so travel direction is clear
+        for (let i = 1; i < pts.length; i++) {
+          const prev = pts[i - 1];
+          const curr = pts[i];
+          const segDist = Math.abs(prev.lat - curr.lat) + Math.abs(prev.lng - curr.lng);
+          if (segDist > 0.00008) {
+            const midLat = (prev.lat + curr.lat) / 2;
+            const midLng = (prev.lng + curr.lng) / 2;
+            const angle = bearingDegrees(prev.lat, prev.lng, curr.lat, curr.lng);
+            L.marker([midLat, midLng], {
+              icon: makeDirectionArrowIcon(angle),
+              interactive: false,
+            }).addTo(layer);
+          }
+        }
+
+        // 4. Draw numbered waypoint markers (#1, #2, #3, ..., #N) at every connected point
         pts.forEach((pt, idx) => {
           const isFirst = idx === 0;
           const isLast = idx === pts.length - 1;
-          const radius = isFirst || isLast ? 7 : 4;
-          const fillColor = isFirst ? '#10b981' : isLast ? '#ef4444' : '#3b82f6';
-          const borderColor = isFirst ? '#065f46' : isLast ? '#991b1b' : '#1d4ed8';
           const title = isFirst
-            ? `🟢 Path Start (Point #1 of ${pts.length})`
+            ? `🟢 Start Point (#1 of ${pts.length})`
             : isLast
-            ? `🔴 Latest Path Point (Point #${idx + 1} of ${pts.length})`
-            : `🔵 Path Waypoint #${idx + 1} of ${pts.length}`;
+            ? `🔴 Latest Point (#${idx + 1} of ${pts.length})`
+            : `🔵 Route Point #${idx + 1} of ${pts.length}`;
 
-          L.circleMarker([pt.lat, pt.lng], {
-            radius,
-            color: borderColor,
-            weight: 2,
-            fillColor,
-            fillOpacity: 1,
+          L.marker([pt.lat, pt.lng], {
+            icon: makeWaypointBadgeIcon(idx + 1, isFirst, isLast),
           })
             .addTo(layer)
             .bindPopup(
               `<strong>${title}</strong><br/>
                Employee: ${selectedEmp?.name || ''}<br/>
-               Segment Step: <strong>+${pt.segment_meters ?? 0} m</strong><br/>
-               Cumulative Path Distance: <strong>${pt.cumulative_km ?? 0} km</strong><br/>
+               Segment from Point #${idx}: <strong>+${pt.segment_meters ?? 0} m</strong><br/>
+               Cumulative Connected Distance: <strong>${formatDistanceLabel(pt.cumulative_km)}</strong><br/>
                Coords: ${Number(pt.lat).toFixed(6)}, ${Number(pt.lng).toFixed(6)}<br/>
                Time: ${pt.recorded_at ? new Date(pt.recorded_at).toLocaleString() : ''}`
             );
         });
 
         const fitKey = `${selectedEmpId}:${historyDate}`;
-        if (fittedEmpIdRef.current !== fitKey) {
-          fittedEmpIdRef.current = fitKey;
-          map.fitBounds(polyline.getBounds(), { padding: [45, 45], maxZoom: 16 });
+        if (fittedKeyRef.current !== fitKey) {
+          fittedKeyRef.current = fitKey;
+          map.fitBounds(directLine.getBounds(), { padding: [50, 50], maxZoom: 17 });
         }
       } else if (pts.length === 1) {
         const pt = pts[0];
-        L.circleMarker([pt.lat, pt.lng], {
-          radius: 7,
-          color: '#065f46',
-          fillColor: '#10b981',
-          fillOpacity: 1,
+        L.marker([pt.lat, pt.lng], {
+          icon: makeWaypointBadgeIcon(1, true, false),
         })
           .addTo(layer)
           .bindPopup(
-            `<strong>🟢 First Recorded Point (#1)</strong><br/>
-             Move at least 5 meters while punched in to add segments to the path.<br/>
+            `<strong>🟢 Point #1 (${selectedEmp?.name || ''})</strong><br/>
+             Only 1 GPS point recorded so far. As the employee moves while punched in, all points will connect automatically.<br/>
              Coords: ${Number(pt.lat).toFixed(6)}, ${Number(pt.lng).toFixed(6)}`
           );
         map.flyTo([pt.lat, pt.lng], 15, { duration: 0.7 });
@@ -278,6 +418,48 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
           );
       });
     } else {
+      // "Show All Employees' Routes" mode: connect today_path for every employee on the map!
+      const allBounds = [];
+      filteredLocations.forEach((loc, empIdx) => {
+        const pts = loc.today_path || [];
+        if (pts.length >= 2) {
+          const color = ROUTE_COLORS[empIdx % ROUTE_COLORS.length];
+          const latLngs = pts.map((p) => [p.lat, p.lng]);
+          allBounds.push(...latLngs);
+
+          L.polyline(latLngs, { color: '#ffffff', weight: 6, opacity: 0.85 }).addTo(layer);
+          L.polyline(latLngs, { color, weight: 3.5, opacity: 0.95 })
+            .addTo(layer)
+            .bindPopup(
+              `<strong>${loc.name} — Connected Route</strong><br/>Distance: ${formatDistanceLabel(
+                loc.today_distance_km,
+                loc.today_distance_meters
+              )} (${pts.length} points)`
+            );
+
+          pts.forEach((pt, idx) => {
+            L.circleMarker([pt.lat, pt.lng], {
+              radius: idx === 0 || idx === pts.length - 1 ? 6 : 3.5,
+              color: '#fff',
+              weight: 1.5,
+              fillColor: color,
+              fillOpacity: 1,
+            })
+              .addTo(layer)
+              .bindPopup(
+                `<strong>${loc.name} — Point #${idx + 1} of ${pts.length}</strong><br/>
+                 Step: +${pt.segment_meters ?? 0} m · Total: ${formatDistanceLabel(pt.cumulative_km)}<br/>
+                 Time: ${pt.recorded_at ? new Date(pt.recorded_at).toLocaleString() : ''}`
+              );
+          });
+        }
+      });
+
+      if (allBounds.length >= 2 && fittedKeyRef.current !== 'ALL') {
+        fittedKeyRef.current = 'ALL';
+        map.fitBounds(L.latLngBounds(allBounds), { padding: [50, 50], maxZoom: 16 });
+      }
+
       tasks.forEach((t) => {
         if (typeof t.completed_lat === 'number' && typeof t.completed_lng === 'number') {
           L.marker([t.completed_lat, t.completed_lng], { icon: makeTaskActionIcon('completed') })
@@ -314,15 +496,11 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
         }
       });
     }
-  }, [historyData, selectedEmp, selectedEmpId, historyDate, tasks]);
+  }, [historyData, roadRoute, routeMode, selectedEmp, selectedEmpId, historyDate, filteredLocations, tasks]);
 
   const selectEmployee = (loc) => {
+    fittedKeyRef.current = null;
     setSelectedEmpId(loc.employee_id);
-    if (mapRef.current && loc.lat != null && loc.lng != null) {
-      mapRef.current.flyTo([loc.lat, loc.lng], 15, { duration: 0.7 });
-      const marker = markersRef.current[loc.employee_id];
-      if (marker) marker.openPopup();
-    }
   };
 
   return (
@@ -359,27 +537,71 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
             fontSize: 12,
           }}
         >
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>Movement Path Date</div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <input
-              type="date"
-              value={historyDate === 'all' ? '' : historyDate}
-              onChange={(e) => setHistoryDate(e.target.value || 'all')}
-              style={{ flex: 1, padding: '5px 8px', borderRadius: 6, border: '1px solid #d1d5db' }}
-            />
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>Route Points Filter</div>
+          <div style={{ display: 'flex', gap: 5, marginBottom: 6 }}>
             <button
               type="button"
-              className="btn btn-secondary"
-              style={{ padding: '5px 8px', fontSize: 11 }}
-              onClick={() => setHistoryDate('all')}
+              className={`btn ${historyDate === 'all' ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ flex: 1, padding: '5px 8px', fontSize: 11 }}
+              onClick={() => {
+                fittedKeyRef.current = null;
+                setHistoryDate('all');
+              }}
             >
-              All
+              All Points
+            </button>
+            <button
+              type="button"
+              className={`btn ${historyDate === todayStr() ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ flex: 1, padding: '5px 8px', fontSize: 11 }}
+              onClick={() => {
+                fittedKeyRef.current = null;
+                setHistoryDate(todayStr());
+              }}
+            >
+              Today
             </button>
           </div>
-          <div style={{ marginTop: 6, color: '#6b7280', fontSize: 11 }}>
-            Click an employee below to view their full multi-point path & total distance covered.
+          <input
+            type="date"
+            value={historyDate === 'all' ? '' : historyDate}
+            onChange={(e) => {
+              fittedKeyRef.current = null;
+              setHistoryDate(e.target.value || 'all');
+            }}
+            style={{ width: '100%', padding: '5px 8px', borderRadius: 6, border: '1px solid #d1d5db' }}
+          />
+          <div style={{ display: 'flex', gap: 5, marginTop: 8 }}>
+            <button
+              type="button"
+              className={`btn ${routeMode === 'both' ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ flex: 1, padding: '5px 6px', fontSize: 11 }}
+              onClick={() => setRouteMode('both')}
+            >
+              🛣️ Road + Points
+            </button>
+            <button
+              type="button"
+              className={`btn ${routeMode === 'direct' ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ flex: 1, padding: '5px 6px', fontSize: 11 }}
+              onClick={() => setRouteMode('direct')}
+            >
+              📏 Direct Points
+            </button>
           </div>
         </div>
+
+        <button
+          type="button"
+          className={`btn ${!selectedEmpId ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ width: '100%', fontSize: 12 }}
+          onClick={() => {
+            fittedKeyRef.current = null;
+            setSelectedEmpId(null);
+          }}
+        >
+          🗺️ Show All Employees&apos; Connected Routes
+        </button>
 
         {filteredLocations.map((loc) => {
           const isSelected = String(selectedEmpId) === String(loc.employee_id);
@@ -402,7 +624,7 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
                 {loc.unit || 'No Unit'} {loc.area ? `· ${loc.area}` : ''}
               </div>
               <div style={{ fontSize: 12, color: '#2563eb', marginTop: 4, fontWeight: 700 }}>
-                🛣️ Path Distance: {formatDistanceLabel(loc.today_distance_km, loc.today_distance_meters)} ({loc.today_points_count ?? 0} pts)
+                🛣️ Connected Path: {formatDistanceLabel(loc.today_distance_km, loc.today_distance_meters)} ({loc.today_points_count ?? 0} pts)
               </div>
               <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
                 {loc.lat != null
@@ -436,15 +658,21 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
               <strong>
                 {selectedEmp.name} ({selectedEmp.unit || '—'})
               </strong>{' '}
-              — Full Tracked Path ({historyDate === 'all' ? 'All Time' : historyDate}):{' '}
+              — Exact Travel Route ({historyDate === 'all' ? 'All Recorded Points' : historyDate}):{' '}
               {loadingHistory && !historyData ? (
-                <span>Loading path...</span>
+                <span>Connecting route points...</span>
               ) : (
                 <>
                   <strong style={{ color: '#1d4ed8' }}>
-                    {formatDistanceLabel(historyData?.distance_km, historyData?.distance_meters)} covered
-                  </strong>{' '}
-                  across <strong>{historyData?.points?.length ?? 0}</strong> path waypoints (every segment summed in order)
+                    GPS Point-to-Point: {formatDistanceLabel(historyData?.distance_km, historyData?.distance_meters)}
+                  </strong>
+                  {roadRoute ? (
+                    <span style={{ marginLeft: 10, color: '#047857', fontWeight: 700 }}>
+                      · 🛣️ Road Distance: {formatDistanceLabel(roadRoute.roadDistanceKm, roadRoute.roadDistanceMeters)}
+                    </span>
+                  ) : null}{' '}
+                  (<strong>{historyData?.points?.length ?? 0}</strong> connected points:{' '}
+                  <code>#1 → #{historyData?.points?.length || 1}</code>)
                 </>
               )}
             </div>
@@ -452,9 +680,12 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
               type="button"
               className="btn btn-secondary"
               style={{ padding: '5px 10px', fontSize: 12 }}
-              onClick={() => setSelectedEmpId(null)}
+              onClick={() => {
+                fittedKeyRef.current = null;
+                setSelectedEmpId(null);
+              }}
             >
-              Clear Path
+              Show All Employees
             </button>
           </div>
         )}
@@ -469,11 +700,13 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
             padding: '0 4px',
           }}
         >
-          <span>🟢 <strong>Path Start (#1)</strong></span>
-          <span>🔵 <strong>Tracked Waypoints & Route Line</strong></span>
-          <span>🔴 <strong>Latest Path Point</strong></span>
-          <span>✅ <strong>Task Completed Location</strong></span>
-          <span>🟠 <strong>Task Rescheduled Location</strong></span>
+          <span>🟢 <strong>#1 Start Point</strong></span>
+          <span>🔵 <strong>#2..#N Connected Route Points & Arrows (▲)</strong></span>
+          <span>🟩 <strong>Exact Road-Snapped Travel Route</strong></span>
+          <span>🔴 <strong>Latest Point</strong></span>
+          <span>✅ <strong>Task Done</strong></span>
+          <span>🟠 <strong>Task Rescheduled</strong></span>
+          <span>❌ <strong>Task Cancelled</strong></span>
         </div>
 
         <div ref={mapElRef} className="map-container" style={{ flex: 1 }} />
