@@ -43,7 +43,7 @@ const taskSchema = new mongoose.Schema(
     scheduled_end: { type: String, required: true },
     status: {
       type: String,
-      enum: ['pending', 'in_progress', 'completed', 'rescheduled'],
+      enum: ['pending', 'in_progress', 'completed', 'rescheduled', 'cancelled'],
       default: 'pending',
     },
     reschedule_reason: { type: String, default: '' },
@@ -54,6 +54,10 @@ const taskSchema = new mongoose.Schema(
     completed_at: { type: Date, default: null },
     completed_lat: { type: Number, default: null },
     completed_lng: { type: Number, default: null },
+    cancel_reason: { type: String, default: '' },
+    cancelled_at: { type: Date, default: null },
+    cancelled_lat: { type: Number, default: null },
+    cancelled_lng: { type: Number, default: null },
   },
   { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } }
 );

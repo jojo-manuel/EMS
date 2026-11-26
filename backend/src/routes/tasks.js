@@ -22,6 +22,10 @@ function formatTask(doc) {
     completed_at: doc.completed_at,
     completed_lat: doc.completed_lat ?? null,
     completed_lng: doc.completed_lng ?? null,
+    cancel_reason: doc.cancel_reason || '',
+    cancelled_at: doc.cancelled_at || null,
+    cancelled_lat: doc.cancelled_lat ?? null,
+    cancelled_lng: doc.cancelled_lng ?? null,
     created_at: doc.created_at,
     updated_at: doc.updated_at,
     assignee_name: assignee ? assignee.name : '',
@@ -80,7 +84,8 @@ function createTasksRouter(io) {
     }
   });
 
-  router.post('/', authenticate, requireAdmin, async (req, res) => {
+  // Admin OR Employee creates a task (Employee creates self-assigned task)
+  router.post('/', authenticate, async (req, res) => {
     try {
       const {
         title,
@@ -91,24 +96,29 @@ function createTasksRouter(io) {
         scheduled_end,
       } = req.body || {};
 
-      if (!title || !assigned_to || !scheduled_start || !scheduled_end) {
+      const isSelfEmployee = req.user.role === 'employee';
+      const targetAssignee = isSelfEmployee ? req.user.id : assigned_to;
+
+      if (!title || !targetAssignee || !scheduled_start || !scheduled_end) {
         return res.status(400).json({
-          error: 'title, assigned_to, scheduled_start, and scheduled_end are required',
+          error: 'title, scheduled_start, and scheduled_end are required',
         });
       }
 
-      const scope = await getAdminUnitScope(req.user);
-      if (scope && !scope.employeeIds.some((id) => String(id) === String(assigned_to))) {
-        return res.status(403).json({
-          error: `You can only assign tasks to employees in your unit (${scope.unit})`,
-        });
+      if (!isSelfEmployee) {
+        const scope = await getAdminUnitScope(req.user);
+        if (scope && !scope.employeeIds.some((id) => String(id) === String(targetAssignee))) {
+          return res.status(403).json({
+            error: `You can only assign tasks to employees in your unit (${scope.unit})`,
+          });
+        }
       }
 
       const created = await Task.create({
         title: title.trim(),
         description: description.trim(),
         address: address.trim(),
-        assigned_to,
+        assigned_to: targetAssignee,
         created_by: req.user.id,
         scheduled_start,
         scheduled_end,
@@ -122,8 +132,12 @@ function createTasksRouter(io) {
 
       const notifDoc = await Notification.create({
         type: 'task_assigned',
-        title: `New Work Assigned: ${task.title}`,
-        message: `"${task.title}" was assigned to ${task.assignee_name} (${task.assignee_unit || 'No Unit'}) for ${new Date(task.scheduled_start).toLocaleString()}.`,
+        title: isSelfEmployee
+          ? `Employee Added Task: ${task.title}`
+          : `New Work Assigned: ${task.title}`,
+        message: isSelfEmployee
+          ? `${task.assignee_name} (${task.assignee_unit || 'No Unit'}) added "${task.title}" to their schedule for ${new Date(task.scheduled_start).toLocaleString()}.`
+          : `"${task.title}" was assigned to ${task.assignee_name} (${task.assignee_unit || 'No Unit'}) for ${new Date(task.scheduled_start).toLocaleString()}.`,
         task_id: created._id,
         employee_id: created.assigned_to,
       });
@@ -131,7 +145,9 @@ function createTasksRouter(io) {
       const notification = formatNotification(notifDoc);
       io.emit('task:created', task);
       io.to('admins').emit('notification:new', notification);
-      io.to(`employee:${task.assigned_to}`).emit('notification:assigned', task);
+      if (!isSelfEmployee) {
+        io.to(`employee:${task.assigned_to}`).emit('notification:assigned', task);
+      }
       return res.status(201).json({ task, notification });
     } catch (err) {
       return res.status(500).json({ error: 'Failed to create task' });
@@ -311,6 +327,67 @@ function createTasksRouter(io) {
       return res.json({ task, notification });
     } catch (err) {
       return res.status(500).json({ error: 'Failed to reschedule task' });
+    }
+  });
+
+  // Employee cancels task (captures cancel reason & GPS coordinates)
+  router.patch('/:id/cancel', authenticate, async (req, res) => {
+    try {
+      const existing = await Task.findById(req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Task not found' });
+
+      if (
+        req.user.role !== 'admin' &&
+        req.user.role !== 'superadmin' &&
+        String(existing.assigned_to) !== String(req.user.id)
+      ) {
+        return res.status(403).json({ error: 'You can only cancel your own tasks' });
+      }
+
+      const { reason = '', lat = null, lng = null } = req.body || {};
+      const now = new Date();
+
+      existing.status = 'cancelled';
+      existing.cancel_reason = reason.trim();
+      existing.cancelled_at = now;
+      if (typeof lat === 'number' && typeof lng === 'number') {
+        existing.cancelled_lat = lat;
+        existing.cancelled_lng = lng;
+        await LocationHistory.create({
+          employee_id: existing.assigned_to,
+          lat,
+          lng,
+          accuracy: 10,
+          recorded_at: now,
+        });
+      }
+      await existing.save();
+
+      const populated = await Task.findById(existing._id)
+        .populate('assigned_to', 'name email employee_code unit area')
+        .lean();
+      const task = formatTask(populated);
+
+      const coordText =
+        typeof lat === 'number' && typeof lng === 'number'
+          ? ` [Location: ${lat.toFixed(5)}, ${lng.toFixed(5)}]`
+          : '';
+
+      const notifDoc = await Notification.create({
+        type: 'task_cancelled',
+        title: `Task Cancelled: ${task.title}`,
+        message: `${task.assignee_name} cancelled "${task.title}".${reason ? ` Reason: ${reason}` : ''}${coordText}`,
+        task_id: existing._id,
+        employee_id: existing.assigned_to,
+      });
+
+      const notification = formatNotification(notifDoc);
+      io.emit('task:updated', task);
+      io.to('admins').emit('notification:new', notification);
+
+      return res.json({ task, notification });
+    } catch (err) {
+      return res.status(500).json({ error: 'Failed to cancel task' });
     }
   });
 

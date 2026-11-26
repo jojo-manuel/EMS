@@ -36,12 +36,12 @@ function toInputTime(iso) {
 }
 
 function isTaskMissed(task) {
-  if (task.status === 'completed') return false;
+  if (task.status === 'completed' || task.status === 'cancelled') return false;
   return new Date(task.scheduled_end).getTime() < Date.now();
 }
 
 function isTaskNewUpcoming(task) {
-  if (task.status === 'completed') return false;
+  if (task.status === 'completed' || task.status === 'cancelled') return false;
   return new Date(task.scheduled_end).getTime() >= Date.now();
 }
 
@@ -53,29 +53,47 @@ const MONTHS = [
 
 export default function ScheduleScreen({ tasks, refreshing, onRefresh }) {
   const [showCalendar, setShowCalendar] = useState(true);
-  const [filterTab, setFilterTab] = useState('all'); // 'all' | 'new' | 'missed' | 'completed'
-  const [selectedDateKey, setSelectedDateKey] = useState(null); // 'YYYY-MM-DD' or null
+  const [filterTab, setFilterTab] = useState('all'); // 'all' | 'new' | 'missed' | 'completed' | 'cancelled'
+  const [selectedDateKey, setSelectedDateKey] = useState(null);
 
   const now = new Date();
   const [calYear, setCalYear] = useState(now.getFullYear());
   const [calMonth, setCalMonth] = useState(now.getMonth());
 
+  // Add Self Task Modal
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [addTitle, setAddTitle] = useState('');
+  const [addAddress, setAddAddress] = useState('');
+  const [addDesc, setAddDesc] = useState('');
+  const [addDate, setAddDate] = useState('');
+  const [addStartTime, setAddStartTime] = useState('');
+  const [addEndTime, setAddEndTime] = useState('');
+
+  // Complete Modal
   const [completeModalTask, setCompleteModalTask] = useState(null);
   const [completionNotes, setCompletionNotes] = useState('');
 
+  // Reschedule Modal
   const [rescheduleModalTask, setRescheduleModalTask] = useState(null);
   const [newDate, setNewDate] = useState('');
   const [newStartTime, setNewStartTime] = useState('');
   const [newEndTime, setNewEndTime] = useState('');
   const [reason, setReason] = useState('');
+
+  // Cancel Modal
+  const [cancelModalTask, setCancelModalTask] = useState(null);
+  const [cancelReason, setCancelReason] = useState('');
+
   const [submitting, setSubmitting] = useState(false);
 
   const counts = useMemo(() => {
     let newCount = 0;
     let missedCount = 0;
     let completedCount = 0;
+    let cancelledCount = 0;
     tasks.forEach((t) => {
       if (t.status === 'completed') completedCount += 1;
+      else if (t.status === 'cancelled') cancelledCount += 1;
       else if (isTaskMissed(t)) missedCount += 1;
       else newCount += 1;
     });
@@ -84,16 +102,19 @@ export default function ScheduleScreen({ tasks, refreshing, onRefresh }) {
       new: newCount,
       missed: missedCount,
       completed: completedCount,
+      cancelled: cancelledCount,
     };
   }, [tasks]);
 
-  // Map date string YYYY-MM-DD -> { hasNew, hasMissed, hasCompleted }
   const dateStatusMap = useMemo(() => {
     const map = {};
     tasks.forEach((t) => {
       const key = toInputDate(t.scheduled_start);
-      if (!map[key]) map[key] = { hasNew: false, hasMissed: false, hasCompleted: false };
+      if (!map[key]) {
+        map[key] = { hasNew: false, hasMissed: false, hasCompleted: false, hasCancelled: false };
+      }
       if (t.status === 'completed') map[key].hasCompleted = true;
+      else if (t.status === 'cancelled') map[key].hasCancelled = true;
       else if (isTaskMissed(t)) map[key].hasMissed = true;
       else map[key].hasNew = true;
     });
@@ -123,6 +144,7 @@ export default function ScheduleScreen({ tasks, refreshing, onRefresh }) {
       if (filterTab === 'new') return isTaskNewUpcoming(t);
       if (filterTab === 'missed') return isTaskMissed(t);
       if (filterTab === 'completed') return t.status === 'completed';
+      if (filterTab === 'cancelled') return t.status === 'cancelled';
       return true;
     });
   }, [tasks, filterTab, selectedDateKey]);
@@ -139,6 +161,18 @@ export default function ScheduleScreen({ tasks, refreshing, onRefresh }) {
     }
     setCalMonth(nextM);
     setCalYear(nextY);
+  };
+
+  const openAddModal = () => {
+    const start = new Date(Date.now() + 15 * 60 * 1000);
+    const end = new Date(start.getTime() + 60 * 60 * 1000);
+    setAddTitle('');
+    setAddAddress('');
+    setAddDesc('');
+    setAddDate(selectedDateKey || toInputDate(start.toISOString()));
+    setAddStartTime(toInputTime(start.toISOString()));
+    setAddEndTime(toInputTime(end.toISOString()));
+    setAddModalOpen(true);
   };
 
   const openReschedule = (task) => {
@@ -162,6 +196,37 @@ export default function ScheduleScreen({ tasks, refreshing, onRefresh }) {
       return { lat: pos.coords.latitude, lng: pos.coords.longitude };
     } catch {
       return { lat: null, lng: null };
+    }
+  }
+
+  async function submitAddTask() {
+    if (!addTitle.trim()) {
+      Alert.alert('Required', 'Please enter a task title.');
+      return;
+    }
+    const startIso = new Date(`${addDate}T${addStartTime}:00`).toISOString();
+    const endIso = new Date(`${addDate}T${addEndTime}:00`).toISOString();
+    if (isNaN(new Date(startIso).getTime()) || isNaN(new Date(endIso).getTime())) {
+      Alert.alert('Invalid Date/Time', 'Please use YYYY-MM-DD and HH:MM format.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await api.createMyTask({
+        title: addTitle.trim(),
+        address: addAddress.trim(),
+        description: addDesc.trim(),
+        scheduled_start: startIso,
+        scheduled_end: endIso,
+      });
+      setAddModalOpen(false);
+      Alert.alert('Task Added', 'Your new task has been added to your schedule and synced with Admin.');
+      onRefresh();
+    } catch (err) {
+      Alert.alert('Error', err.message);
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -204,11 +269,29 @@ export default function ScheduleScreen({ tasks, refreshing, onRefresh }) {
     }
   }
 
+  async function submitCancel() {
+    if (!cancelModalTask) return;
+    setSubmitting(true);
+    try {
+      const { lat, lng } = await getCurrentCoordsSafe();
+      await api.cancelTask(cancelModalTask.id, cancelReason, lat, lng);
+      setCancelModalTask(null);
+      setCancelReason('');
+      Alert.alert('Task Cancelled', 'The task was marked cancelled and the admin was notified.');
+      onRefresh();
+    } catch (err) {
+      Alert.alert('Error', err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   const badgeStyle = (task) => {
-    if (task.status === 'completed') return { bg: '#d1fae5', color: '#065f46', label: 'Completed' };
+    if (task.status === 'completed') return { bg: '#d1fae5', color: '#065f46', label: 'Done' };
+    if (task.status === 'cancelled') return { bg: '#fee2e2', color: '#991b1b', label: 'Cancelled' };
     if (isTaskMissed(task)) return { bg: '#fee2e2', color: '#991b1b', label: 'Missed' };
     if (task.status === 'rescheduled') return { bg: '#fef3c7', color: '#92400e', label: 'Rescheduled' };
-    return { bg: '#dbeafe', color: '#1e40af', label: 'New / Upcoming' };
+    return { bg: '#dbeafe', color: '#1e40af', label: 'Scheduled' };
   };
 
   return (
@@ -220,20 +303,25 @@ export default function ScheduleScreen({ tasks, refreshing, onRefresh }) {
         contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
         ListHeaderComponent={
           <View style={{ marginBottom: 12 }}>
-            {/* Top Bar: Toggle Calendar + Filter Tabs */}
+            {/* Top Bar: Add Task + Toggle Calendar */}
             <View style={styles.topHeaderRow}>
               <Text style={styles.sectionHeading}>Work Schedule</Text>
-              <TouchableOpacity
-                style={styles.calToggleBtn}
-                onPress={() => setShowCalendar((v) => !v)}
-              >
-                <Text style={styles.calToggleText}>
-                  {showCalendar ? '📅 Hide Calendar' : '📅 Show Calendar'}
-                </Text>
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TouchableOpacity style={styles.addTaskBtn} onPress={openAddModal}>
+                  <Text style={styles.addTaskBtnText}>+ Add Task</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.calToggleBtn}
+                  onPress={() => setShowCalendar((v) => !v)}
+                >
+                  <Text style={styles.calToggleText}>
+                    {showCalendar ? '📅 Hide' : '📅 Calendar'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
-            {/* Category Filter Tabs: Whole, New, Missed, Completed */}
+            {/* Category Filter Tabs: Whole, New, Missed, Done, Cancelled */}
             <View style={styles.filterRow}>
               <TouchableOpacity
                 style={[styles.filterChip, filterTab === 'all' && styles.filterChipActive]}
@@ -278,6 +366,23 @@ export default function ScheduleScreen({ tasks, refreshing, onRefresh }) {
                   style={[styles.filterText, filterTab === 'completed' && styles.filterTextActive]}
                 >
                   Done ({counts.completed})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.filterChip,
+                  filterTab === 'cancelled' && { backgroundColor: '#6b7280', borderColor: '#6b7280' },
+                ]}
+                onPress={() => setFilterTab('cancelled')}
+              >
+                <Text
+                  style={[
+                    styles.filterText,
+                    filterTab === 'cancelled' && { color: '#fff' },
+                  ]}
+                >
+                  Cancel ({counts.cancelled})
                 </Text>
               </TouchableOpacity>
             </View>
@@ -327,6 +432,7 @@ export default function ScheduleScreen({ tasks, refreshing, onRefresh }) {
                             {cell.info.hasNew && <View style={[styles.dotIndicator, { backgroundColor: '#2563eb' }]} />}
                             {cell.info.hasMissed && <View style={[styles.dotIndicator, { backgroundColor: '#ef4444' }]} />}
                             {cell.info.hasCompleted && <View style={[styles.dotIndicator, { backgroundColor: '#10b981' }]} />}
+                            {cell.info.hasCancelled && <View style={[styles.dotIndicator, { backgroundColor: '#6b7280' }]} />}
                           </View>
                         )}
                       </TouchableOpacity>
@@ -337,7 +443,7 @@ export default function ScheduleScreen({ tasks, refreshing, onRefresh }) {
                 <View style={styles.calLegend}>
                   <View style={styles.legendItem}>
                     <View style={[styles.dotIndicator, { backgroundColor: '#2563eb' }]} />
-                    <Text style={styles.legendText}>New Schedule</Text>
+                    <Text style={styles.legendText}>Scheduled</Text>
                   </View>
                   <View style={styles.legendItem}>
                     <View style={[styles.dotIndicator, { backgroundColor: '#ef4444' }]} />
@@ -345,7 +451,11 @@ export default function ScheduleScreen({ tasks, refreshing, onRefresh }) {
                   </View>
                   <View style={styles.legendItem}>
                     <View style={[styles.dotIndicator, { backgroundColor: '#10b981' }]} />
-                    <Text style={styles.legendText}>Completed</Text>
+                    <Text style={styles.legendText}>Done</Text>
+                  </View>
+                  <View style={styles.legendItem}>
+                    <View style={[styles.dotIndicator, { backgroundColor: '#6b7280' }]} />
+                    <Text style={styles.legendText}>Cancelled</Text>
                   </View>
                 </View>
 
@@ -365,7 +475,7 @@ export default function ScheduleScreen({ tasks, refreshing, onRefresh }) {
         }
         ListEmptyComponent={
           <Text style={styles.empty}>
-            No schedules match this filter. Pull down to refresh.
+            No schedules match this filter. Tap "+ Add Task" to create one or pull down to refresh.
           </Text>
         }
         renderItem={({ item }) => {
@@ -387,8 +497,11 @@ export default function ScheduleScreen({ tasks, refreshing, onRefresh }) {
               {item.reschedule_reason ? (
                 <Text style={styles.reschedNote}>↻ Rescheduled: {item.reschedule_reason}</Text>
               ) : null}
+              {item.cancel_reason ? (
+                <Text style={styles.cancelNote}>✕ Cancelled: {item.cancel_reason}</Text>
+              ) : null}
 
-              {item.status !== 'completed' && (
+              {item.status !== 'completed' && item.status !== 'cancelled' && (
                 <View style={styles.actions}>
                   <TouchableOpacity
                     style={[styles.btn, styles.btnGreen]}
@@ -397,13 +510,22 @@ export default function ScheduleScreen({ tasks, refreshing, onRefresh }) {
                       setCompletionNotes('');
                     }}
                   >
-                    <Text style={styles.btnText}>✓ Mark Complete</Text>
+                    <Text style={styles.btnText}>✓ Done</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.btn, styles.btnAmber]}
                     onPress={() => openReschedule(item)}
                   >
-                    <Text style={styles.btnText}>↻ Reschedule</Text>
+                    <Text style={styles.btnText}>↻ Schedule</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.btn, styles.btnRed]}
+                    onPress={() => {
+                      setCancelModalTask(item);
+                      setCancelReason('');
+                    }}
+                  >
+                    <Text style={styles.btnText}>✕ Cancel</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -412,11 +534,82 @@ export default function ScheduleScreen({ tasks, refreshing, onRefresh }) {
         }}
       />
 
-      {/* Complete Modal */}
+      {/* Add Task Modal */}
+      <Modal visible={addModalOpen} transparent animationType="slide">
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modal}>
+            <Text style={styles.modalTitle}>Add New Task</Text>
+            <Text style={styles.modalSub}>
+              Add a task to your schedule (syncs with Admin calendar)
+            </Text>
+
+            <Text style={styles.label}>Task Title *</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g., Client Site Visit - MG Road"
+              value={addTitle}
+              onChangeText={setAddTitle}
+            />
+
+            <Text style={styles.label}>Date (YYYY-MM-DD) *</Text>
+            <TextInput style={styles.input} value={addDate} onChangeText={setAddDate} />
+
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.label}>Start (HH:MM) *</Text>
+                <TextInput
+                  style={styles.input}
+                  value={addStartTime}
+                  onChangeText={setAddStartTime}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.label}>End (HH:MM) *</Text>
+                <TextInput style={styles.input} value={addEndTime} onChangeText={setAddEndTime} />
+              </View>
+            </View>
+
+            <Text style={styles.label}>Location / Address</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g., Kochi Infopark Phase 2"
+              value={addAddress}
+              onChangeText={setAddAddress}
+            />
+
+            <Text style={styles.label}>Description / Notes</Text>
+            <TextInput
+              style={[styles.input, { height: 64, textAlignVertical: 'top' }]}
+              placeholder="Details about the work..."
+              value={addDesc}
+              onChangeText={setAddDesc}
+              multiline
+            />
+
+            <View style={styles.actions}>
+              <TouchableOpacity
+                style={[styles.btn, styles.btnGray]}
+                onPress={() => setAddModalOpen(false)}
+              >
+                <Text style={{ color: '#111827', fontWeight: '600' }}>Close</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.btn, styles.btnBlue]}
+                onPress={submitAddTask}
+                disabled={submitting}
+              >
+                <Text style={styles.btnText}>{submitting ? 'Adding...' : 'Add Task'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Complete (Done) Modal */}
       <Modal visible={!!completeModalTask} transparent animationType="slide">
         <View style={styles.modalBackdrop}>
           <View style={styles.modal}>
-            <Text style={styles.modalTitle}>Complete Work</Text>
+            <Text style={styles.modalTitle}>Mark Task Done</Text>
             <Text style={styles.modalSub}>{completeModalTask?.title}</Text>
             <TextInput
               style={[styles.input, { height: 80, textAlignVertical: 'top' }]}
@@ -430,14 +623,14 @@ export default function ScheduleScreen({ tasks, refreshing, onRefresh }) {
                 style={[styles.btn, styles.btnGray]}
                 onPress={() => setCompleteModalTask(null)}
               >
-                <Text style={{ color: '#111827', fontWeight: '600' }}>Cancel</Text>
+                <Text style={{ color: '#111827', fontWeight: '600' }}>Back</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.btn, styles.btnGreen]}
                 onPress={submitComplete}
                 disabled={submitting}
               >
-                <Text style={styles.btnText}>{submitting ? 'Saving...' : 'Confirm Complete'}</Text>
+                <Text style={styles.btnText}>{submitting ? 'Saving...' : 'Confirm Done'}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -484,7 +677,7 @@ export default function ScheduleScreen({ tasks, refreshing, onRefresh }) {
                 style={[styles.btn, styles.btnGray]}
                 onPress={() => setRescheduleModalTask(null)}
               >
-                <Text style={{ color: '#111827', fontWeight: '600' }}>Cancel</Text>
+                <Text style={{ color: '#111827', fontWeight: '600' }}>Back</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.btn, styles.btnAmber]}
@@ -492,7 +685,46 @@ export default function ScheduleScreen({ tasks, refreshing, onRefresh }) {
                 disabled={submitting}
               >
                 <Text style={styles.btnText}>
-                  {submitting ? 'Saving...' : 'Reschedule & Notify Admin'}
+                  {submitting ? 'Saving...' : 'Reschedule & Notify'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Cancel Task Modal */}
+      <Modal visible={!!cancelModalTask} transparent animationType="slide">
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modal}>
+            <Text style={styles.modalTitle}>Cancel Task</Text>
+            <Text style={styles.modalSub}>
+              {cancelModalTask?.title} (Admin will be notified with your reason & location)
+            </Text>
+
+            <Text style={styles.label}>Reason for Cancellation</Text>
+            <TextInput
+              style={[styles.input, { height: 80, textAlignVertical: 'top' }]}
+              placeholder="e.g., Client cancelled appointment"
+              value={cancelReason}
+              onChangeText={setCancelReason}
+              multiline
+            />
+
+            <View style={styles.actions}>
+              <TouchableOpacity
+                style={[styles.btn, styles.btnGray]}
+                onPress={() => setCancelModalTask(null)}
+              >
+                <Text style={{ color: '#111827', fontWeight: '600' }}>Back</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.btn, styles.btnRed]}
+                onPress={submitCancel}
+                disabled={submitting}
+              >
+                <Text style={styles.btnText}>
+                  {submitting ? 'Cancelling...' : 'Confirm Cancel'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -512,18 +744,25 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   sectionHeading: { fontSize: 18, fontWeight: '800', color: '#111827' },
+  addTaskBtn: {
+    backgroundColor: '#2563eb',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  addTaskBtnText: { fontSize: 12, fontWeight: '700', color: '#fff' },
   calToggleBtn: {
     backgroundColor: '#fff',
     borderWidth: 1,
     borderColor: '#d1d5db',
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 8,
   },
   calToggleText: { fontSize: 12, fontWeight: '700', color: '#2563eb' },
   filterRow: {
     flexDirection: 'row',
-    gap: 6,
+    gap: 5,
     marginBottom: 12,
   },
   filterChip: {
@@ -539,7 +778,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#2563eb',
     borderColor: '#2563eb',
   },
-  filterText: { fontSize: 12, fontWeight: '700', color: '#374151' },
+  filterText: { fontSize: 11, fontWeight: '700', color: '#374151' },
   filterTextActive: { color: '#fff' },
   calCard: {
     backgroundColor: '#fff',
@@ -594,7 +833,8 @@ const styles = StyleSheet.create({
   calLegend: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 16,
+    flexWrap: 'wrap',
+    gap: 12,
     marginTop: 10,
     paddingTop: 8,
     borderTopWidth: 1,
@@ -632,12 +872,15 @@ const styles = StyleSheet.create({
   meta: { fontSize: 13, color: '#4b5563', marginBottom: 4 },
   desc: { fontSize: 13, color: '#6b7280', marginTop: 4 },
   reschedNote: { fontSize: 12, color: '#92400e', marginTop: 4, fontWeight: '600' },
-  actions: { flexDirection: 'row', gap: 10, marginTop: 14 },
+  cancelNote: { fontSize: 12, color: '#991b1b', marginTop: 4, fontWeight: '600' },
+  actions: { flexDirection: 'row', gap: 8, marginTop: 14 },
   btn: { flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
+  btnBlue: { backgroundColor: '#2563eb' },
   btnGreen: { backgroundColor: '#10b981' },
   btnAmber: { backgroundColor: '#f59e0b' },
+  btnRed: { backgroundColor: '#ef4444' },
   btnGray: { backgroundColor: '#e5e7eb' },
-  btnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  btnText: { color: '#fff', fontWeight: '700', fontSize: 12 },
   modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',

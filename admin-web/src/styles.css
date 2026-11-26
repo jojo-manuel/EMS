@@ -259,6 +259,11 @@ body {
   color: #92400e;
 }
 
+.badge-cancelled {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
 /* Modal */
 .modal-backdrop {
   position: fixed;

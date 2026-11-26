@@ -167,7 +167,11 @@ function createLocationsRouter(io) {
         EmployeeLocation.findOne({ employee_id: employeeId }).lean(),
         Task.find({
           assigned_to: employeeId,
-          $or: [{ completed_lat: { $ne: null } }, { rescheduled_lat: { $ne: null } }],
+          $or: [
+            { completed_lat: { $ne: null } },
+            { rescheduled_lat: { $ne: null } },
+            { cancelled_lat: { $ne: null } },
+          ],
         })
           .sort({ updated_at: -1 })
           .lean(),
@@ -216,6 +220,18 @@ function createLocationsRouter(io) {
             lng: t.rescheduled_lng,
             note: t.reschedule_reason || '',
             timestamp: t.rescheduled_at || t.updated_at,
+          });
+        }
+        if (typeof t.cancelled_lat === 'number' && typeof t.cancelled_lng === 'number') {
+          taskMarkers.push({
+            id: `${t._id}-cancelled`,
+            task_id: String(t._id),
+            type: 'cancelled',
+            title: t.title,
+            lat: t.cancelled_lat,
+            lng: t.cancelled_lng,
+            note: t.cancel_reason || '',
+            timestamp: t.cancelled_at || t.updated_at,
           });
         }
       });

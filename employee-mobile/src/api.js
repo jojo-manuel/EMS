@@ -25,6 +25,11 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
   getMyTasks: () => request('/api/tasks'),
+  createMyTask: (payload) =>
+    request('/api/tasks', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   completeTask: (id, notes, lat = null, lng = null) =>
     request(`/api/tasks/${id}/complete`, {
       method: 'PATCH',
@@ -34,6 +39,11 @@ export const api = {
     request(`/api/tasks/${id}/reschedule`, {
       method: 'PATCH',
       body: JSON.stringify({ scheduled_start, scheduled_end, reason, lat, lng }),
+    }),
+  cancelTask: (id, reason, lat = null, lng = null) =>
+    request(`/api/tasks/${id}/cancel`, {
+      method: 'PATCH',
+      body: JSON.stringify({ reason, lat, lng }),
     }),
   sendLocation: (lat, lng, accuracy = 0) =>
     request('/api/locations', {

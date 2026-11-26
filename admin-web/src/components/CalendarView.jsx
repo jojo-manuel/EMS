@@ -14,6 +14,7 @@ function toLocalInputValue(iso) {
 function statusColor(status) {
   if (status === 'completed') return '#10b981';
   if (status === 'rescheduled') return '#f59e0b';
+  if (status === 'cancelled') return '#ef4444';
   return '#2563eb';
 }
 
@@ -127,6 +128,7 @@ export default function CalendarView({ tasks, employees, onRefresh }) {
           <span className="badge badge-pending">Pending</span>
           <span className="badge badge-rescheduled">Rescheduled</span>
           <span className="badge badge-completed">Completed</span>
+          <span className="badge badge-cancelled">Cancelled</span>
         </div>
         <button className="btn btn-primary" onClick={() => openCreateModal()}>
           + Assign Work
@@ -198,6 +200,25 @@ export default function CalendarView({ tasks, employees, onRefresh }) {
                 >
                   {Number(editingTask.completed_lat).toFixed(5)}, {Number(editingTask.completed_lng).toFixed(5)} (View on Map)
                 </a>
+              </div>
+            )}
+
+            {editingTask?.status === 'cancelled' && (
+              <div className="error-banner" style={{ background: '#fef2f2', color: '#991b1b', borderColor: '#fecaca' }}>
+                <strong>Cancelled by Employee:</strong> {editingTask.cancel_reason || 'No reason provided'}
+                {editingTask.cancelled_lat != null && (
+                  <div style={{ marginTop: 4, fontSize: 12 }}>
+                    📍 Cancelled at GPS:{' '}
+                    <a
+                      href={`https://www.google.com/maps?q=${editingTask.cancelled_lat},${editingTask.cancelled_lng}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: '#b91c1c', fontWeight: 700 }}
+                    >
+                      {Number(editingTask.cancelled_lat).toFixed(5)}, {Number(editingTask.cancelled_lng).toFixed(5)} (View on Map)
+                    </a>
+                  </div>
+                )}
               </div>
             )}
 

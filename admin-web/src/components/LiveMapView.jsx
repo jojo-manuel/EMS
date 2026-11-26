@@ -19,8 +19,9 @@ function makeMarkerIcon(isTracking, initials) {
 
 function makeTaskActionIcon(type) {
   const isComplete = type === 'completed';
-  const bg = isComplete ? '#059669' : '#d97706';
-  const symbol = isComplete ? '✓' : '↻';
+  const isCancelled = type === 'cancelled';
+  const bg = isComplete ? '#059669' : isCancelled ? '#dc2626' : '#d97706';
+  const symbol = isComplete ? '✓' : isCancelled ? '✕' : '↻';
   return L.divIcon({
     className: 'custom-task-action-marker',
     html: `<div style="
@@ -257,9 +258,14 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
         map.flyTo([pt.lat, pt.lng], 15, { duration: 0.7 });
       }
 
-      // Plot task completion & reschedule markers for selected employee
+      // Plot task completion, reschedule & cancel markers for selected employee
       (historyData.task_markers || []).forEach((tm) => {
-        const label = tm.type === 'completed' ? '✓ Task Completed Here' : '↻ Task Rescheduled Here';
+        const label =
+          tm.type === 'completed'
+            ? '✓ Task Completed Here'
+            : tm.type === 'cancelled'
+            ? '✕ Task Cancelled Here'
+            : '↻ Task Rescheduled Here';
         L.marker([tm.lat, tm.lng], { icon: makeTaskActionIcon(tm.type) })
           .addTo(layer)
           .bindPopup(
@@ -293,6 +299,17 @@ export default function LiveMapView({ locations, tasks = [], currentUser }) {
                Employee: ${t.assignee_name} (${t.assignee_unit || ''})<br/>
                ${t.reschedule_reason ? `Reason: ${t.reschedule_reason}<br/>` : ''}
                Coords: ${Number(t.rescheduled_lat).toFixed(5)}, ${Number(t.rescheduled_lng).toFixed(5)}`
+            );
+        }
+        if (typeof t.cancelled_lat === 'number' && typeof t.cancelled_lng === 'number') {
+          L.marker([t.cancelled_lat, t.cancelled_lng], { icon: makeTaskActionIcon('cancelled') })
+            .addTo(layer)
+            .bindPopup(
+              `<strong>✕ Task Cancelled Location</strong><br/>
+               Task: <strong>${t.title}</strong><br/>
+               Employee: ${t.assignee_name} (${t.assignee_unit || ''})<br/>
+               ${t.cancel_reason ? `Reason: ${t.cancel_reason}<br/>` : ''}
+               Coords: ${Number(t.cancelled_lat).toFixed(5)}, ${Number(t.cancelled_lng).toFixed(5)}`
             );
         }
       });
