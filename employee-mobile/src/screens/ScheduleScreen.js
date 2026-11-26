@@ -494,6 +494,11 @@ export default function ScheduleScreen({ tasks, refreshing, onRefresh }) {
               </Text>
               {item.address ? <Text style={styles.meta}>📍 {item.address}</Text> : null}
               {item.description ? <Text style={styles.desc}>{item.description}</Text> : null}
+              {item.transferred_from_name ? (
+                <Text style={{ fontSize: 12, color: '#1e40af', marginTop: 4, fontWeight: '600' }}>
+                  ⇄ Transferred from: {item.transferred_from_name}
+                </Text>
+              ) : null}
               {item.reschedule_reason ? (
                 <Text style={styles.reschedNote}>↻ Rescheduled: {item.reschedule_reason}</Text>
               ) : null}

@@ -58,6 +58,8 @@ const taskSchema = new mongoose.Schema(
     cancelled_at: { type: Date, default: null },
     cancelled_lat: { type: Number, default: null },
     cancelled_lng: { type: Number, default: null },
+    transferred_from_name: { type: String, default: '' },
+    transferred_at: { type: Date, default: null },
   },
   { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } }
 );
@@ -107,12 +109,27 @@ const attendanceSchema = new mongoose.Schema(
   { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } }
 );
 
+const leaveSchema = new mongoose.Schema(
+  {
+    employee_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    leave_type: { type: String, enum: ['single_day', 'custom'], default: 'single_day' },
+    start_date: { type: String, required: true }, // YYYY-MM-DD
+    end_date: { type: String, required: true },   // YYYY-MM-DD
+    reason: { type: String, default: '' },
+    transfer_to: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    transferred_tasks_count: { type: Number, default: 0 },
+    created_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  },
+  { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } }
+);
+
 const User = mongoose.model('User', userSchema);
 const Task = mongoose.model('Task', taskSchema);
 const EmployeeLocation = mongoose.model('EmployeeLocation', employeeLocationSchema);
 const LocationHistory = mongoose.model('LocationHistory', locationHistorySchema);
 const Notification = mongoose.model('Notification', notificationSchema);
 const Attendance = mongoose.model('Attendance', attendanceSchema);
+const Leave = mongoose.model('Leave', leaveSchema);
 
 async function seedDatabase() {
   const [existingSuperAdmin, existingAdmin] = await Promise.all([
@@ -202,4 +219,5 @@ module.exports = {
   LocationHistory,
   Notification,
   Attendance,
+  Leave,
 };

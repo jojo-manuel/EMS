@@ -16,6 +16,7 @@ export default function App() {
 
   const [tasks, setTasks] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [leaves, setLeaves] = useState([]);
   const [admins, setAdmins] = useState([]);
   const [locations, setLocations] = useState([]);
   const [attendance, setAttendance] = useState([]);
@@ -38,6 +39,7 @@ export default function App() {
       const [tRes, eRes, lRes, aRes, nRes, admRes] = await Promise.all(promises);
       setTasks(tRes.tasks);
       setEmployees(eRes.employees);
+      setLeaves(eRes.leaves || []);
       setLocations(lRes.locations);
       setAttendance(aRes.records);
       setNotifications(nRes.notifications);
@@ -178,7 +180,13 @@ export default function App() {
           )}
           {tab === 'attendance' && <AttendanceView records={attendance} />}
           {tab === 'employees' && (
-            <EmployeesView employees={employees} currentUser={user} onRefresh={loadAll} />
+            <EmployeesView
+              employees={employees}
+              leaves={leaves}
+              tasks={tasks}
+              currentUser={user}
+              onRefresh={loadAll}
+            />
           )}
           {tab === 'admins' && user.role === 'superadmin' && (
             <AdminsView admins={admins} currentUser={user} onRefresh={loadAll} />

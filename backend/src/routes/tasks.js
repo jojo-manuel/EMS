@@ -26,6 +26,8 @@ function formatTask(doc) {
     cancelled_at: doc.cancelled_at || null,
     cancelled_lat: doc.cancelled_lat ?? null,
     cancelled_lng: doc.cancelled_lng ?? null,
+    transferred_from_name: doc.transferred_from_name || '',
+    transferred_at: doc.transferred_at || null,
     created_at: doc.created_at,
     updated_at: doc.updated_at,
     assignee_name: assignee ? assignee.name : '',
@@ -388,6 +390,56 @@ function createTasksRouter(io) {
       return res.json({ task, notification });
     } catch (err) {
       return res.status(500).json({ error: 'Failed to cancel task' });
+    }
+  });
+
+  // Admin transfers assigned task to another employee
+  router.patch('/:id/transfer', authenticate, requireAdmin, async (req, res) => {
+    try {
+      const existing = await Task.findById(req.params.id).populate('assigned_to', 'name unit');
+      if (!existing) return res.status(404).json({ error: 'Task not found' });
+
+      const { new_assigned_to } = req.body || {};
+      if (!new_assigned_to) {
+        return res.status(400).json({ error: 'new_assigned_to employee ID is required' });
+      }
+
+      const scope = await getAdminUnitScope(req.user);
+      if (scope && !scope.employeeIds.some((id) => String(id) === String(new_assigned_to))) {
+        return res.status(403).json({
+          error: `You can only transfer tasks to employees in your unit (${scope.unit})`,
+        });
+      }
+
+      const previousName =
+        existing.assigned_to && existing.assigned_to.name ? existing.assigned_to.name : 'Previous Employee';
+
+      existing.transferred_from_name = previousName;
+      existing.transferred_at = new Date();
+      existing.assigned_to = new_assigned_to;
+      await existing.save();
+
+      const populated = await Task.findById(existing._id)
+        .populate('assigned_to', 'name email employee_code unit area')
+        .lean();
+      const task = formatTask(populated);
+
+      const notifDoc = await Notification.create({
+        type: 'task_transferred',
+        title: `Work Transferred: ${task.title}`,
+        message: `"${task.title}" was transferred from ${previousName} to ${task.assignee_name}.`,
+        task_id: existing._id,
+        employee_id: existing.assigned_to,
+      });
+
+      const notification = formatNotification(notifDoc);
+      io.emit('task:updated', task);
+      io.to('admins').emit('notification:new', notification);
+      io.to(`employee:${task.assigned_to}`).emit('notification:assigned', task);
+
+      return res.json({ task, notification });
+    } catch (err) {
+      return res.status(500).json({ error: 'Failed to transfer task' });
     }
   });
 

@@ -21,6 +21,8 @@ function statusColor(status) {
 export default function CalendarView({ tasks, employees, onRefresh }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
+  const [transferToId, setTransferToId] = useState('');
+  const [transferring, setTransferring] = useState(false);
   const [form, setForm] = useState({
     title: '',
     description: '',
@@ -38,13 +40,15 @@ export default function CalendarView({ tasks, employees, onRefresh }) {
       start.setHours(9, 0, 0, 0);
     }
     const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
+    const availableEmp = employees.find((e) => !e.on_leave_today) || employees[0];
     setEditingTask(null);
+    setTransferToId('');
     setError('');
     setForm({
       title: '',
       description: '',
       address: '',
-      assigned_to: employees[0]?.id ? String(employees[0].id) : '',
+      assigned_to: availableEmp?.id ? String(availableEmp.id) : '',
       scheduled_start: toLocalInputValue(start.toISOString()),
       scheduled_end: toLocalInputValue(end.toISOString()),
     });
@@ -52,7 +56,9 @@ export default function CalendarView({ tasks, employees, onRefresh }) {
   };
 
   const openEditModal = (task) => {
+    const otherEmp = employees.find((e) => String(e.id) !== String(task.assigned_to));
     setEditingTask(task);
+    setTransferToId(otherEmp ? String(otherEmp.id) : '');
     setError('');
     setForm({
       title: task.title,
@@ -90,6 +96,21 @@ export default function CalendarView({ tasks, employees, onRefresh }) {
     }
   }
 
+  async function handleQuickTransfer() {
+    if (!editingTask || !transferToId) return;
+    setError('');
+    setTransferring(true);
+    try {
+      await api.transferTask(editingTask.id, transferToId);
+      setModalOpen(false);
+      onRefresh();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setTransferring(false);
+    }
+  }
+
   async function handleDelete() {
     if (!editingTask) return;
     if (!window.confirm(`Delete "${editingTask.title}"?`)) return;
@@ -120,6 +141,10 @@ export default function CalendarView({ tasks, employees, onRefresh }) {
     borderColor: statusColor(t.status),
     extendedProps: { task: t },
   }));
+
+  const transferOptions = editingTask
+    ? employees.filter((e) => String(e.id) !== String(editingTask.assigned_to))
+    : [];
 
   return (
     <div className="card">
@@ -156,13 +181,66 @@ export default function CalendarView({ tasks, employees, onRefresh }) {
         <div className="modal-backdrop" onClick={() => setModalOpen(false)}>
           <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={handleSave}>
             <div className="modal-header">
-              <h3>{editingTask ? 'Edit Assigned Work' : 'Assign New Work'}</h3>
+              <h3>{editingTask ? 'Edit / Transfer Assigned Work' : 'Assign New Work'}</h3>
               {editingTask && (
                 <span className={`badge badge-${editingTask.status}`}>{editingTask.status}</span>
               )}
             </div>
 
             {error && <div className="error-banner">{error}</div>}
+
+            {editingTask?.transferred_from_name && (
+              <div className="error-banner" style={{ background: '#eff6ff', color: '#1e40af', borderColor: '#bfdbfe' }}>
+                ⇄ <strong>Transferred from:</strong> {editingTask.transferred_from_name}
+                {editingTask.transferred_at
+                  ? ` on ${new Date(editingTask.transferred_at).toLocaleString()}`
+                  : ''}
+              </div>
+            )}
+
+            {editingTask && transferOptions.length > 0 && (
+              <div
+                style={{
+                  background: '#f8fafc',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 10,
+                  padding: 12,
+                  marginBottom: 14,
+                }}
+              >
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#1e293b', marginBottom: 6 }}>
+                  ⇄ Transfer This Work to Another Employee
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <select
+                    value={transferToId}
+                    onChange={(e) => setTransferToId(e.target.value)}
+                    style={{
+                      flex: 1,
+                      padding: '8px 10px',
+                      borderRadius: 8,
+                      border: '1px solid #cbd5e1',
+                      fontSize: 13,
+                    }}
+                  >
+                    {transferOptions.map((emp) => (
+                      <option key={emp.id} value={emp.id}>
+                        {emp.name} ({emp.employee_code || emp.unit})
+                        {emp.on_leave_today ? ' [🏖️ ON LEAVE]' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={handleQuickTransfer}
+                    disabled={transferring || !transferToId}
+                  >
+                    {transferring ? 'Transferring...' : '⇄ Transfer'}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {editingTask?.reschedule_reason && (
               <div className="error-banner" style={{ background: '#fffbeb', color: '#92400e', borderColor: '#fde68a' }}>
@@ -241,7 +319,10 @@ export default function CalendarView({ tasks, employees, onRefresh }) {
               >
                 {employees.map((emp) => (
                   <option key={emp.id} value={emp.id}>
-                    {emp.name} ({emp.email})
+                    {emp.name} ({emp.employee_code || emp.unit})
+                    {emp.active_leave
+                      ? ` [🏖️ LEAVE: ${emp.active_leave.start_date}→${emp.active_leave.end_date}]`
+                      : ''}
                   </option>
                 ))}
               </select>

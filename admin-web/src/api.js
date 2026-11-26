@@ -58,6 +58,15 @@ export const api = {
     request(`/api/users/employees/${id}`, {
       method: 'DELETE',
     }),
+  markEmployeeLeave: (employeeId, payload) =>
+    request(`/api/users/employees/${employeeId}/leave`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  deleteLeave: (leaveId) =>
+    request(`/api/users/leaves/${leaveId}`, {
+      method: 'DELETE',
+    }),
   getAdmins: () => request('/api/users/admins'),
   createAdmin: (payload) =>
     request('/api/users/admins', {
@@ -78,6 +87,11 @@ export const api = {
     request(`/api/tasks/${id}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
+    }),
+  transferTask: (id, new_assigned_to) =>
+    request(`/api/tasks/${id}/transfer`, {
+      method: 'PATCH',
+      body: JSON.stringify({ new_assigned_to }),
     }),
   deleteTask: (id) =>
     request(`/api/tasks/${id}`, {
