@@ -18,7 +18,7 @@ function statusColor(status) {
   return '#2563eb';
 }
 
-export default function CalendarView({ tasks, employees, onRefresh }) {
+export default function CalendarView({ tasks, employees, onRefresh, onOpenLeaveTransfer }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [transferToId, setTransferToId] = useState('');
@@ -155,9 +155,16 @@ export default function CalendarView({ tasks, employees, onRefresh }) {
           <span className="badge badge-completed">Completed</span>
           <span className="badge badge-cancelled">Cancelled</span>
         </div>
-        <button className="btn btn-primary" onClick={() => openCreateModal()}>
-          + Assign Work
-        </button>
+        <div style={{ display: 'flex', gap: 10 }}>
+          {onOpenLeaveTransfer && (
+            <button className="btn btn-secondary" onClick={onOpenLeaveTransfer}>
+              🏖️ Mark Leave / Transfer Work
+            </button>
+          )}
+          <button className="btn btn-primary" onClick={() => openCreateModal()}>
+            + Assign Work
+          </button>
+        </div>
       </div>
 
       <FullCalendar

@@ -5,6 +5,7 @@ import LoginPage from './components/LoginPage';
 import CalendarView from './components/CalendarView';
 import LiveMapView from './components/LiveMapView';
 import EmployeesView from './components/EmployeesView';
+import LeaveTransferView from './components/LeaveTransferView';
 import AdminsView from './components/AdminsView';
 import AttendanceView from './components/AttendanceView';
 import NotificationsPanel from './components/NotificationsPanel';
@@ -119,6 +120,7 @@ export default function App() {
 
   const titles = {
     calendar: 'Work Schedule Calendar',
+    leave: 'Employee Leave & Work Transfer',
     map: 'Live Employee Tracking Map',
     attendance: 'Fingerprint Attendance & Punches',
     employees: 'Employees Directory',
@@ -133,6 +135,9 @@ export default function App() {
         </div>
         <button className={`nav-btn ${tab === 'calendar' ? 'active' : ''}`} onClick={() => setTab('calendar')}>
           📅 Calendar & Tasks
+        </button>
+        <button className={`nav-btn ${tab === 'leave' ? 'active' : ''}`} onClick={() => setTab('leave')}>
+          🏖️ Leave & Work Transfer
         </button>
         <button className={`nav-btn ${tab === 'map' ? 'active' : ''}`} onClick={() => setTab('map')}>
           📍 Live Location Map
@@ -173,7 +178,21 @@ export default function App() {
 
         <main className="content">
           {tab === 'calendar' && (
-            <CalendarView tasks={tasks} employees={employees} onRefresh={loadAll} />
+            <CalendarView
+              tasks={tasks}
+              employees={employees}
+              onRefresh={loadAll}
+              onOpenLeaveTransfer={() => setTab('leave')}
+            />
+          )}
+          {tab === 'leave' && (
+            <LeaveTransferView
+              employees={employees}
+              leaves={leaves}
+              tasks={tasks}
+              currentUser={user}
+              onRefresh={loadAll}
+            />
           )}
           {tab === 'map' && (
             <LiveMapView locations={locations} tasks={tasks} currentUser={user} />

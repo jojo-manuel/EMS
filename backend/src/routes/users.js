@@ -127,6 +127,7 @@ router.post('/employees/:id/leave', authenticate, requireAdmin, async (req, res)
       end_date,
       reason = '',
       transfer_to = '',
+      task_ids = null,
     } = req.body || {};
 
     if (!start_date) {
@@ -162,15 +163,23 @@ router.post('/employees/:id/leave', authenticate, requireAdmin, async (req, res)
         return res.status(404).json({ error: 'Target transfer employee not found' });
       }
 
-      // Transfer all open tasks scheduled during the leave window [start_date 00:00 IST, finalEndDate 23:59:59 IST]
-      const rangeStartIso = new Date(`${start_date}T00:00:00.000+05:30`).toISOString();
-      const rangeEndIso = new Date(`${finalEndDate}T23:59:59.999+05:30`).toISOString();
+      let tasksToTransfer = [];
+      if (Array.isArray(task_ids) && task_ids.length > 0) {
+        tasksToTransfer = await Task.find({
+          _id: { $in: task_ids },
+          assigned_to: empId,
+          status: { $in: ['pending', 'in_progress', 'rescheduled'] },
+        });
+      } else {
+        const rangeStartIso = new Date(`${start_date}T00:00:00.000+05:30`).toISOString();
+        const rangeEndIso = new Date(`${finalEndDate}T23:59:59.999+05:30`).toISOString();
 
-      const tasksToTransfer = await Task.find({
-        assigned_to: empId,
-        status: { $in: ['pending', 'in_progress', 'rescheduled'] },
-        scheduled_start: { $gte: rangeStartIso, $lte: rangeEndIso },
-      });
+        tasksToTransfer = await Task.find({
+          assigned_to: empId,
+          status: { $in: ['pending', 'in_progress', 'rescheduled'] },
+          scheduled_start: { $gte: rangeStartIso, $lte: rangeEndIso },
+        });
+      }
 
       const now = new Date();
       for (const t of tasksToTransfer) {
